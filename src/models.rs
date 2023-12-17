@@ -252,6 +252,18 @@ pub struct PlayerData<'a> {
 
 // ############### Deserialization Utils ###############
 
+/// Deserialize an instance of `T` from a raw value.
+///
+/// See [`serde_json::from_str`] to know more.
+pub fn parse_arbitrary<'a, T>(
+    data: ArbitraryData<'a>
+) -> Result<T, serde_json::Error>
+where
+    T: serde::Deserialize<'a>
+{
+    serde_json::from_str(data.get())
+}
+
 fn deserialize_selected_track<'de, D>(
     deserializer: D
 ) -> Result<Option<usize>, D::Error>
