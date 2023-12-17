@@ -414,6 +414,64 @@ pub struct PlayerData<'a> {
     pub filters: Filters<'a>,
 }
 
+/// Memory stats in bytes of the node.
+#[allow(missing_docs)]
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct Memory {
+    pub free: usize,
+    pub used: usize,
+    pub allocated: usize,
+    pub reservable: usize,
+}
+
+/// Cpu stats of the node.
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct Cpu {
+    /// Amount of cores that the node has.
+    pub cores: usize,
+    /// Total load of the node.
+    #[serde(rename = "systemLoad")]
+    pub system_load: f64,
+    /// Load of the running service (i.e. Lavalink instance).
+    #[serde(rename = "lavalinkLoad")]
+    pub lavalink_load: f64,
+}
+
+/// Frame stats of the node.
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct FrameStats {
+    /// The amount of frames sent to Discord.
+    pub sent: usize,
+    /// The amount of frames that were nulled.
+    pub nulled: usize,
+    /// The difference between sent frames and the expected amount of frames.
+    pub deficit: usize,
+}
+
+/// Collection of statistics reported by a node.
+#[derive(Deserialize, Debug)]
+#[allow(dead_code)]
+pub struct Stats {
+    /// The amount of players connected to the server.
+    pub players: usize,
+    /// The amount of players playing a track.
+    #[serde(rename = "playingPlayers")]
+    pub playing_players: usize,
+    /// The uptime of the node in milliseconds.
+    pub uptime: Milli,
+    /// The memory stats of the node.
+    pub memory: Memory,
+    /// The cpu stats of the node.
+    pub cpu: Cpu,
+    /// The frame stats of the node. None if node has no players or when
+    /// retrieved via /v4/stats. TODO: change endpoint to the calling method.
+    #[serde(rename = "frameStats")]
+    pub frame_stats: Option<FrameStats>,
+}
+
 // ############### Predefined Filters ###############
 
 // TODO: create functions that return default filters.
