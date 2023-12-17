@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, de};
+use serde::{Deserialize, Serialize, de};
 use serde_json::value::RawValue;
 
 // ############### Types ###############
@@ -27,6 +27,8 @@ pub type RawData<'a> = &'a RawValue;
 /// This error is returned by some Lavalink instance upon an unexpected
 /// behaviour while loading tracks or controling the players trough its
 /// REST API.
+///
+/// Note that trace is ommited here, since it isn't set in any call to the API.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct ErrorData {
@@ -162,7 +164,7 @@ pub struct State {
 }
 
 /// Represents the player voice channel state.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct VoiceState {
     /// The Discord voice token to authenticate with.
@@ -179,39 +181,135 @@ pub struct VoiceState {
 /// The [`gain`] is the multiplier for the given band (defaults to 0). -0.25
 /// means the given band is completely muted, while 0.25 means it's doubled.
 /// Besides that, it may change the volume of the output.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Equalizer {
-    /// One of 0 to 14.
+    /// Band must be 0 <= x <= 14.
     pub band: u8,
-    /// Between -0.25 to 1.0.
+    /// Gain must be -0.25 <= x <= 1.0.
     pub gain: f32,
 }
 
 /// Represents a karaoke equilization.
 ///
 /// Used to eliminate part of a band, usually targeting vocals.
-#[derive(Deserialize, Debug)]
+///
+/// Level and mono level must be 0.0 (low effect) <= x <= 1.0 (full effect).
+#[allow(missing_docs)]
+#[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Kareoke {
-    /// Between 0.0 (low effect) and 1.0 (full effect).
     pub level: Option<f32>,
-    /// Between 0.0 (low effect) and 1.0 (full effect).
     #[serde(rename = "monoLevel")]
-    pub mono_level: Option<f32>,
-    /// Filter band in Hz.
+    pub mono_level: Option<f64>,
     #[serde(rename = "filterBand")]
-    pub filter_band: Option<f32>,
-    /// Filter width.
+    pub filter_band: Option<f64>,
     #[serde(rename = "filterWidth")]
-    pub filter_width: Option<f32>,
+    pub filter_width: Option<f64>,
+}
+
+/// Changes the speed, pitch and rate.
+///
+/// For each variant, 1.0 is the default value and must be >= 0.0.
+#[allow(missing_docs)]
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+pub struct Timescale {
+    pub speed: Option<f32>,
+    pub pitch: Option<f32>,
+    pub rate: Option<f32>,
+}
+
+/// Create a shuddering effect by using amplification, where the volume quicky
+/// oscillates.
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+pub struct Tremolo {
+    /// Frenquency must be > 0.0.
+    pub frequency: Option<f32>,
+    /// Depth must be between 0.0 < x <= 1.0.
+    pub depth: Option<f32>,
+}
+
+/// Similar to tremolo, but this one oscillates the pitch.
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+pub struct Vibrato {
+    /// Frequency must be 0.0 < x <= 14.0.
+    pub frequency: Option<f32>,
+    /// Vibrato depth must be 0.0 < x <= 1.0.
+    pub depth: Option<f32>,
+}
+
+/// Rotates the sound around the stereo channels/user headphones (aka Audio
+/// Panning).
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+pub struct Rotation {
+    /// The frequency of the audio rotating around the listener in Hz.
+    #[serde(rename = "rotationHz")]
+    pub rotation: Option<f64>,
+}
+
+/// Represents the distortion effect.
+#[allow(missing_docs)]
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+pub struct Distortion {
+    #[serde(rename = "sinOffset")]
+    pub sin_offset: Option<f64>,
+    #[serde(rename = "sinScale")]
+    pub sin_scale: Option<f64>,
+    #[serde(rename = "cosOffset")]
+    pub cos_offset: Option<f64>,
+    #[serde(rename = "cosScale")]
+    pub cos_scale: Option<f64>,
+    #[serde(rename = "sinOffset")]
+    pub tan_offset: Option<f64>,
+    #[serde(rename = "tanScale")]
+    pub tan_scale: Option<f64>,
+    pub offset: Option<f64>,
+    pub scale: Option<f64>,
+}
+
+/// Mixes both channels (left and right), with a configurable factor on how much
+/// each channel affects the other.
+///
+/// With the defaults, both channels are kept independent of each other.
+///
+/// Each channel mix factor must be 0.0 <= x <= 1.0.
+///
+/// Setting all factors to 0.5 means both channels get the same audio.
+#[allow(missing_docs)]
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+pub struct ChannelMix {
+    #[serde(rename = "leftToLeft")]
+    pub left_to_left: Option<f32>,
+    #[serde(rename = "leftToRight")]
+    pub left_to_right: Option<f32>,
+    #[serde(rename = "rightToLeft")]
+    pub right_to_left: Option<f32>,
+    #[serde(rename = "rightToRight")]
+    pub right_to_right: Option<f32>,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
+/// Higher frequencies get suppressed, while lower frequencies pass through this
+/// filter, thus the name low pass.
+///
+/// Any smoothing values <= 1.0 will disable the filter.
+pub struct LowPass {
+    /// Smoothing must be > 1.0 if you pretend to keep it active.
+    pub smoothing: Option<f32>,
 }
 
 /// Contains a map of plugins raw configuration.
 ///
 /// Configuration isn't already parsed since it depends on the plugins that you
 /// use.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct PluginFilters<'a> {
     #[serde(borrow)]
@@ -226,7 +324,7 @@ impl<'a> PluginFilters<'a> {
 }
 
 /// Represents the player filters.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Filters<'a> {
     /// Adjusts the player volume from 0.0 to 5.0, where 1.0 is 100%.
@@ -235,9 +333,23 @@ pub struct Filters<'a> {
     pub equalizer: Option<Vec<Equalizer>>,
     /// Eliminates part of a band, usually targeting vocals.
     pub karaoke: Option<Kareoke>,
-
-    // TODO: remaining filters.
-
+    /// Composes the speed, pitch and rate.
+    pub timescale: Option<Timescale>,
+    /// Creates a shuddering effect, where the volume quicky oscillates.
+    pub tremolo: Option<Tremolo>,
+    /// Similar to tremolo, but this one oscillates the pitch.
+    pub vibrato: Option<Vibrato>,
+    /// Rotates the audio around the stereo channels/user headphones (aka Audio
+    /// Panning)
+    pub rotation: Option<Rotation>,
+    /// Distorion effect.
+    pub distortion: Option<Distortion>,
+    /// Mixes both channels (left and right).
+    #[serde(rename = "channelMix")]
+    pub channel_mix: Option<ChannelMix>,
+    /// Filters higher frequencies.
+    #[serde(rename = "lowPass")]
+    pub low_pass: Option<LowPass>,
     /// Plugin filters.
     #[serde(rename = "pluginFilters")]
     #[serde(borrow)]
@@ -266,6 +378,10 @@ pub struct PlayerData<'a> {
     #[serde(borrow)]
     pub filters: Filters<'a>,
 }
+
+// ############### Predefined Filters ###############
+
+// TODO: create functions that return default filters.
 
 // ############### Deserialization Utils ###############
 
@@ -415,6 +531,10 @@ where
 
     deserializer.deserialize_map(PluginFiltersVisitor)
 }
+
+// ############### Serialization Utils ###############
+
+// TODO: implement plugins filters serializer.
 
 #[cfg(test)]
 mod test {
