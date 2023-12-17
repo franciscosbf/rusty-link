@@ -14,7 +14,7 @@ pub type StatusCode = u16;
 /// Player volume.
 pub type Volume = u16;
 /// Player filter volume adjustment.
-pub type FilterVolume = f32;
+pub type FilterVolume = f64;
 /// Unparsed json (i.e. stills in raw format).
 pub type RawData<'a> = &'a RawValue;
 /// Map of configurations for each plugin filter(s).
@@ -187,7 +187,7 @@ pub struct Equalizer {
     /// Band must be 0 <= x <= 14.
     pub band: u8,
     /// Gain must be -0.25 <= x <= 1.0.
-    pub gain: f32,
+    pub gain: f64,
 }
 
 /// Represents a karaoke equilization.
@@ -199,7 +199,7 @@ pub struct Equalizer {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Kareoke {
-    pub level: Option<f32>,
+    pub level: Option<f64>,
     #[serde(rename = "monoLevel")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mono_level: Option<f64>,
@@ -219,11 +219,11 @@ pub struct Kareoke {
 #[allow(dead_code)]
 pub struct Timescale {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub speed: Option<f32>,
+    pub speed: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pitch: Option<f32>,
+    pub pitch: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rate: Option<f32>,
+    pub rate: Option<f64>,
 }
 
 /// Create a shuddering effect by using amplification, where the volume quicky
@@ -233,10 +233,10 @@ pub struct Timescale {
 pub struct Tremolo {
     /// Frenquency must be > 0.0.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub frequency: Option<f32>,
+    pub frequency: Option<f64>,
     /// Depth must be between 0.0 < x <= 1.0.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub depth: Option<f32>,
+    pub depth: Option<f64>,
 }
 
 /// Similar to tremolo, but this one oscillates the pitch.
@@ -245,14 +245,14 @@ pub struct Tremolo {
 pub struct Vibrato {
     /// Frequency must be 0.0 < x <= 14.0.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub frequency: Option<f32>,
+    pub frequency: Option<f64>,
     /// Vibrato depth must be 0.0 < x <= 1.0.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub depth: Option<f32>,
+    pub depth: Option<f64>,
 }
 
-/// Rotates the sound around the stereo channels/user headphones (aka Audio
-/// Panning).
+/// Rotates the sound around the stereo channels/user headphones (also known as
+/// Audio Panning).
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Rotation {
@@ -305,16 +305,16 @@ pub struct Distortion {
 pub struct ChannelMix {
     #[serde(rename = "leftToLeft")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub left_to_left: Option<f32>,
+    pub left_to_left: Option<f64>,
     #[serde(rename = "leftToRight")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub left_to_right: Option<f32>,
+    pub left_to_right: Option<f64>,
     #[serde(rename = "rightToLeft")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub right_to_left: Option<f32>,
+    pub right_to_left: Option<f64>,
     #[serde(rename = "rightToRight")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub right_to_right: Option<f32>,
+    pub right_to_right: Option<f64>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -326,7 +326,7 @@ pub struct ChannelMix {
 pub struct LowPass {
     /// Smoothing must be > 1.0 if you pretend to keep it active.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub smoothing: Option<f32>,
+    pub smoothing: Option<f64>,
 }
 
 /// Contains a map of plugins raw configuration.
