@@ -201,10 +201,13 @@ pub struct Equalizer {
 pub struct Kareoke {
     pub level: Option<f32>,
     #[serde(rename = "monoLevel")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mono_level: Option<f64>,
     #[serde(rename = "filterBand")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_band: Option<f64>,
     #[serde(rename = "filterWidth")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_width: Option<f64>,
 }
 
@@ -215,8 +218,11 @@ pub struct Kareoke {
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Timescale {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speed: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pitch: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rate: Option<f32>,
 }
 
@@ -226,8 +232,10 @@ pub struct Timescale {
 #[allow(dead_code)]
 pub struct Tremolo {
     /// Frenquency must be > 0.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency: Option<f32>,
     /// Depth must be between 0.0 < x <= 1.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<f32>,
 }
 
@@ -236,8 +244,10 @@ pub struct Tremolo {
 #[allow(dead_code)]
 pub struct Vibrato {
     /// Frequency must be 0.0 < x <= 14.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub frequency: Option<f32>,
     /// Vibrato depth must be 0.0 < x <= 1.0.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<f32>,
 }
 
@@ -248,6 +258,7 @@ pub struct Vibrato {
 pub struct Rotation {
     /// The frequency of the audio rotating around the listener in Hz.
     #[serde(rename = "rotationHz")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rotation: Option<f64>,
 }
 
@@ -257,18 +268,26 @@ pub struct Rotation {
 #[allow(dead_code)]
 pub struct Distortion {
     #[serde(rename = "sinOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sin_offset: Option<f64>,
     #[serde(rename = "sinScale")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sin_scale: Option<f64>,
     #[serde(rename = "cosOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cos_offset: Option<f64>,
     #[serde(rename = "cosScale")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cos_scale: Option<f64>,
-    #[serde(rename = "sinOffset")]
+    #[serde(rename = "tanOffset")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tan_offset: Option<f64>,
     #[serde(rename = "tanScale")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tan_scale: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub scale: Option<f64>,
 }
 
@@ -285,12 +304,16 @@ pub struct Distortion {
 #[allow(dead_code)]
 pub struct ChannelMix {
     #[serde(rename = "leftToLeft")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub left_to_left: Option<f32>,
     #[serde(rename = "leftToRight")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub left_to_right: Option<f32>,
     #[serde(rename = "rightToLeft")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub right_to_left: Option<f32>,
     #[serde(rename = "rightToRight")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub right_to_right: Option<f32>,
 }
 
@@ -302,6 +325,7 @@ pub struct ChannelMix {
 /// Any smoothing values <= 1.0 will disable the filter.
 pub struct LowPass {
     /// Smoothing must be > 1.0 if you pretend to keep it active.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub smoothing: Option<f32>,
 }
 
@@ -328,32 +352,43 @@ impl<'a> PluginFilters<'a> {
 #[allow(dead_code)]
 pub struct Filters<'a> {
     /// Adjusts the player volume from 0.0 to 5.0, where 1.0 is 100%.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<FilterVolume>,
     /// Equalizer with 15 different bands.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub equalizer: Option<Vec<Equalizer>>,
     /// Eliminates part of a band, usually targeting vocals.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub karaoke: Option<Kareoke>,
     /// Composes the speed, pitch and rate.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timescale: Option<Timescale>,
     /// Creates a shuddering effect, where the volume quicky oscillates.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tremolo: Option<Tremolo>,
     /// Similar to tremolo, but this one oscillates the pitch.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub vibrato: Option<Vibrato>,
     /// Rotates the audio around the stereo channels/user headphones (aka Audio
     /// Panning)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rotation: Option<Rotation>,
     /// Distorion effect.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub distortion: Option<Distortion>,
     /// Mixes both channels (left and right).
     #[serde(rename = "channelMix")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_mix: Option<ChannelMix>,
     /// Filters higher frequencies.
     #[serde(rename = "lowPass")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub low_pass: Option<LowPass>,
     /// Plugin filters.
     #[serde(rename = "pluginFilters")]
     #[serde(borrow)]
     #[serde(deserialize_with = "deserialize_plugin_filters")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin_filters: Option<PluginFilters<'a>>,
 }
 
