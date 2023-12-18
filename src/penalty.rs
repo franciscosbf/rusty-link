@@ -12,24 +12,28 @@ type Events = [u64; 4];
 type Timestamp = i64;
 
 pub(crate) enum EventMetric {
-    Stuck, Exception, Failed, Attempt
+    Stuck, Exception, Failed, Attempt,
 }
 
 use self::EventMetric::*;
 
 pub(crate) struct PlayerPenalty {
-    cached_events: RwLock<LruCache<Timestamp, Events>>
+    cached_events: RwLock<LruCache<Timestamp, Events>>,
+    minute: Duration,
 }
 
 impl PlayerPenalty {
     pub(crate) fn new(cached_events: NonZeroUsize) -> Self {
-        Self { cached_events: RwLock::new(LruCache::new(cached_events)) }
+        Self {
+            cached_events: RwLock::new(LruCache::new(cached_events)),
+            minute: Duration::minutes(1),
+        }
     }
 
     pub(crate) async fn register_event(&self, event: EventMetric) {
         // Truncates the date in the current minute.
         let truncated_timestamp = Utc::now()
-            .duration_trunc(Duration::minutes(1))
+            .duration_trunc(self.minute)
             .unwrap()
             .timestamp();
 
