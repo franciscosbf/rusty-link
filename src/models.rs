@@ -107,7 +107,7 @@ pub struct PlaylistInfo {
     /// Selected track index, if any.
     #[serde(rename = "selectedTrack")]
     #[serde(deserialize_with = "deserialize_selected_track")]
-    pub selected_track: Option<u32>,
+    pub selected_track: Option<u64>,
 }
 
 /// Contains the decoded playlist metadata.
@@ -424,10 +424,10 @@ pub struct PlayerData<'a> {
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct Memory {
-    pub free: u32,
-    pub used: u32,
-    pub allocated: u32,
-    pub reservable: u32,
+    pub free: u64,
+    pub used: u64,
+    pub allocated: u64,
+    pub reservable: u64,
 }
 
 /// Cpu stats of the node.
@@ -435,7 +435,7 @@ pub struct Memory {
 #[allow(dead_code)]
 pub struct Cpu {
     /// Amount of cores that the node has.
-    pub cores: u32,
+    pub cores: u64,
     /// Total load of the node.
     #[serde(rename = "systemLoad")]
     pub system_load: f64,
@@ -449,11 +449,11 @@ pub struct Cpu {
 #[allow(dead_code)]
 pub struct FrameStats {
     /// The amount of frames sent to Discord.
-    pub sent: u32,
+    pub sent: u64,
     /// The amount of frames that were nulled.
-    pub nulled: u32,
+    pub nulled: u64,
     /// The difference between sent frames and the expected amount of frames.
-    pub deficit: u32,
+    pub deficit: u64,
 }
 
 /// Collection of statistics reported by a node.
@@ -461,10 +461,10 @@ pub struct FrameStats {
 #[allow(dead_code)]
 pub struct Stats {
     /// The amount of players connected to the server.
-    pub players: u32,
+    pub players: u64,
     /// The amount of players playing a track.
     #[serde(rename = "playingPlayers")]
-    pub playing_players: u32,
+    pub playing_players: u64,
     /// The uptime of the node in milliseconds.
     pub uptime: Milli,
     /// The memory stats of the node.
@@ -495,14 +495,14 @@ where
 
 fn deserialize_selected_track<'de, D>(
     deserializer: D
-) -> Result<Option<u32>, D::Error>
+) -> Result<Option<u64>, D::Error>
 where
     D: de::Deserializer<'de>,
 {
     struct SelectedTrackVisitor;
 
     impl<'de> de::Visitor<'de> for SelectedTrackVisitor {
-        type Value = Option<u32>;
+        type Value = Option<u64>;
 
         fn expecting(
             &self,
@@ -517,7 +517,7 @@ where
         where
             E: de::Error,
         {
-            Ok(if v > -1 { Some(v as u32) } else { None })
+            Ok(if v > -1 { Some(v as u64) } else { None })
         }
     }
 
