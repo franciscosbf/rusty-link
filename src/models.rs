@@ -1,4 +1,11 @@
-//! TODO:
+//! Payloads to control Lavalink players.
+//!
+//! Some of them are used to fetch metadata about tracks, playlists or even
+//! results from a search engine result (e.g., `ytsearch`, `soundcloud`).
+//!
+//! Theres're also structs that contain the current internal state of a given
+//! node and route planner configuration.
+//! TODO: last one not implemented yet.
 
 use std::collections::HashMap;
 
@@ -17,8 +24,6 @@ pub type Volume = u16;
 pub type FilterVolume = f64;
 /// Unparsed json (i.e. stills in raw format).
 pub type RawData<'a> = &'a RawValue;
-/// Map of configurations for each plugin filter(s).
-// pub type PluginFilters<'a> = HashMap<PluginName, ArbitraryData<'a>>;
 
 // ############### Models ###############
 
@@ -472,9 +477,7 @@ pub struct Stats {
     pub frame_stats: Option<FrameStats>,
 }
 
-// ############### Predefined Filters ###############
-
-// TODO: create functions that return default filters.
+// TODO: route planners data...
 
 // ############### Deserialization Utils ###############
 
