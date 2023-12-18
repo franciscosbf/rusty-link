@@ -15,7 +15,7 @@ use serde_json::value::RawValue;
 // ############### Types ###############
 
 /// Milliseconds representation.
-pub type Milli = usize;
+pub type Milli = u64;
 /// HTTP status code.
 pub type StatusCode = u16;
 /// Player volume.
@@ -107,7 +107,7 @@ pub struct PlaylistInfo {
     /// Selected track index, if any.
     #[serde(rename = "selectedTrack")]
     #[serde(deserialize_with = "deserialize_selected_track")]
-    pub selected_track: Option<usize>,
+    pub selected_track: Option<u32>,
 }
 
 /// Contains the decoded playlist metadata.
@@ -424,10 +424,10 @@ pub struct PlayerData<'a> {
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct Memory {
-    pub free: usize,
-    pub used: usize,
-    pub allocated: usize,
-    pub reservable: usize,
+    pub free: u32,
+    pub used: u32,
+    pub allocated: u32,
+    pub reservable: u32,
 }
 
 /// Cpu stats of the node.
@@ -435,7 +435,7 @@ pub struct Memory {
 #[allow(dead_code)]
 pub struct Cpu {
     /// Amount of cores that the node has.
-    pub cores: usize,
+    pub cores: u32,
     /// Total load of the node.
     #[serde(rename = "systemLoad")]
     pub system_load: f64,
@@ -449,11 +449,11 @@ pub struct Cpu {
 #[allow(dead_code)]
 pub struct FrameStats {
     /// The amount of frames sent to Discord.
-    pub sent: usize,
+    pub sent: u32,
     /// The amount of frames that were nulled.
-    pub nulled: usize,
+    pub nulled: u32,
     /// The difference between sent frames and the expected amount of frames.
-    pub deficit: usize,
+    pub deficit: u32,
 }
 
 /// Collection of statistics reported by a node.
@@ -461,10 +461,10 @@ pub struct FrameStats {
 #[allow(dead_code)]
 pub struct Stats {
     /// The amount of players connected to the server.
-    pub players: usize,
+    pub players: u32,
     /// The amount of players playing a track.
     #[serde(rename = "playingPlayers")]
-    pub playing_players: usize,
+    pub playing_players: u32,
     /// The uptime of the node in milliseconds.
     pub uptime: Milli,
     /// The memory stats of the node.
@@ -495,14 +495,14 @@ where
 
 fn deserialize_selected_track<'de, D>(
     deserializer: D
-) -> Result<Option<usize>, D::Error>
+) -> Result<Option<u32>, D::Error>
 where
     D: de::Deserializer<'de>,
 {
     struct SelectedTrackVisitor;
 
     impl<'de> de::Visitor<'de> for SelectedTrackVisitor {
-        type Value = Option<usize>;
+        type Value = Option<u32>;
 
         fn expecting(
             &self,
@@ -517,7 +517,7 @@ where
         where
             E: de::Error,
         {
-            Ok(if v > -1 { Some(v as usize) } else { None })
+            Ok(if v > -1 { Some(v as u32) } else { None })
         }
     }
 
