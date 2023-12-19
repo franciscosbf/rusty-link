@@ -9,11 +9,13 @@
 #![warn(missing_docs)]
 #![doc(test(attr(deny(warnings))))]
 
-mod core;
+pub(crate) mod penalty;
 
+pub mod utils;
 pub mod cache;
 pub mod models;
 pub mod filters;
 pub mod node;
 pub mod player;
 pub mod queue;
+pub mod error;
