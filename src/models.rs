@@ -162,7 +162,7 @@ pub use self::LoadResult::*;
 /// position...).
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct State {
+pub struct PlayerState {
     /// Unix timestamp in milliseconds,
     pub time: Milli,
     /// Position of the track in milliseconds.
@@ -177,7 +177,7 @@ pub struct State {
 /// Represents the player voice channel state.
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-pub struct VoiceState {
+pub struct PlayerVoiceState {
     /// The Discord voice token to authenticate with.
     pub token: String,
     /// The Discord voice endpoint to connect to.
@@ -361,7 +361,7 @@ impl<'a> PluginFilters<'a> {
 /// Represents the player filters.
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-pub struct Filters<'a> {
+pub struct PlayerFilters<'a> {
     /// Adjusts the player volume from 0.0 to 5.0, where 1.0 is 100%.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<FilterVolume>,
@@ -417,12 +417,12 @@ pub struct PlayerData<'a> {
     /// Whether the player is paused.
     pub paused: bool,
     /// The player state.
-    pub state: State,
+    pub state: PlayerState,
     /// The voice state of the player.
-    pub voice: VoiceState,
+    pub voice: PlayerVoiceState,
     /// The filters used by the player.
     #[serde(borrow)]
-    pub filters: Filters<'a>,
+    pub filters: PlayerFilters<'a>,
 }
 
 /// Memory stats in bytes of the node.
@@ -462,10 +462,16 @@ pub struct FrameStats {
     pub deficit: u64,
 }
 
+impl FrameStats {
+    fn new() -> Self {
+        Self { sent: 0, nulled: 0, deficit: 0 }
+    }
+}
+
 /// Collection of statistics reported by a node.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct Stats {
+pub struct NodeStats {
     /// The amount of players connected to the server.
     pub players: u64,
     /// The amount of players playing a track.
@@ -699,7 +705,7 @@ mod test {
             }
         }"#;
 
-        let res = serde_json::from_str::<Filters>(raw);
+        let res = serde_json::from_str::<PlayerFilters>(raw);
         assert!(res.is_ok(), "got error: {:?}", res);
 
         let plugin_filters = res.unwrap().plugin_filters;
