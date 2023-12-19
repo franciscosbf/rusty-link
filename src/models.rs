@@ -7,7 +7,7 @@
 //! node and route planner configuration.
 //! TODO: last one not implemented yet.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize, de};
 use serde_json::value::RawValue;
@@ -36,7 +36,7 @@ pub type RawData<'a> = &'a RawValue;
 /// Note that trace is ommited here, since it isn't set in any call to the API.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct ErrorData {
+pub struct ApiError {
     /// The error time in milliseconds since Unix epoch.
     pub timestamp: Milli,
     /// HTTP status code.
@@ -45,6 +45,12 @@ pub struct ErrorData {
     pub error: String,
     /// Error message (i.e. explanation).
     pub message: String,
+}
+
+impl Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "got: {}; reason: {}", self.status, self.message)
+    }
 }
 
 /// Represents the track description.
@@ -147,7 +153,7 @@ pub enum LoadResult<'a> {
     ),
     /// When something went wrong.
     #[serde(rename = "error")]
-    Fail(ErrorData),
+    Fail(ApiError),
 }
 
 pub use self::LoadResult::*;
