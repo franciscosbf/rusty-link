@@ -427,7 +427,7 @@ pub struct PlayerData<'a> {
 
 /// Memory stats in bytes of the node.
 #[allow(missing_docs)]
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct Memory {
     pub free: u64,
@@ -437,7 +437,7 @@ pub struct Memory {
 }
 
 /// Cpu stats of the node.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct Cpu {
     /// Amount of cores that the node has.
@@ -451,7 +451,7 @@ pub struct Cpu {
 }
 
 /// Frame stats of the node.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct FrameStats {
     /// The amount of frames sent to Discord.
@@ -463,7 +463,7 @@ pub struct FrameStats {
 }
 
 /// Collection of statistics reported by a node.
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub struct NodeStats {
     /// The amount of players connected to the server.
