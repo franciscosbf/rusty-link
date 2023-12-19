@@ -39,7 +39,7 @@ pub struct NodeInfo {
 }
 
 impl NodeInfo {
-    fn _parse_url(&self, base: &str, path: &str) -> Result<Url, url::ParseError> {
+    fn parse_url(&self, base: &str, path: &str) -> Result<Url, url::ParseError> {
         let raw = format!(
             "{}{}://{}:{}/v4{}", base,
             if self.secure { "s" } else { "" },
@@ -49,11 +49,11 @@ impl NodeInfo {
     }
 
     fn rest(&self) -> Result<Url, url::ParseError> {
-        self._parse_url("http", "")
+        self.parse_url("http", "")
     }
 
     fn ws(&self) -> Result<Url, url::ParseError> {
-        self._parse_url("ws", "/websocket")
+        self.parse_url("ws", "/websocket")
     }
 }
 
@@ -63,13 +63,30 @@ struct WebSocket {
     handler: Option<JoinHandle<Result<(), tungstenite::Error>>>,
 }
 
+struct Stats {
+    data: NodeStats,
+}
+
+impl Stats {
+    fn new(stats: NodeStats) -> Self {
+        Self { data: stats }
+    }
+
+    /// Updates only if new uptime is greater than the current one.
+    fn maybe_update(&mut self, new: &NodeStats) {
+        if self.data.uptime < new.uptime {
+            self.data = *new;
+        }
+    }
+}
+
 /// TODO:
 pub struct NodeRef {
     base_rest_url: Url,
     client: reqwest::Client,
     ws: WebSocket,
     players: Arc<RwLock<HashMap<GuildId, Player>>>,
-    stats: Arc<RwLock<NodeStats>>,
+    stats: Arc<RwLock<Stats>>,
 }
 
 impl NodeRef {
@@ -112,7 +129,7 @@ impl NodeRef {
         Self {
             base_rest_url, client, ws,
             players: Arc::new(RwLock::new(HashMap::new())),
-            stats: Arc::new(RwLock::new(initial_stats))
+            stats: Arc::new(RwLock::new(Stats::new(initial_stats)))
         }
     }
 
@@ -124,7 +141,13 @@ impl NodeRef {
             Ok(response) => {
                 if response.status() == reqwest::StatusCode::OK {
                     match response.json::<NodeStats>().await {
-                        Ok(stats) => Ok(stats),
+                        Ok(stats) => {
+                            // Tries to update the current uptime.
+                            let mut current_stats = self.stats.write().await;
+                            current_stats.maybe_update(&stats);
+
+                            Ok(stats)
+                        },
                         Err(_) => Err(NodeError::ParseError),
                     }
                 } else {
