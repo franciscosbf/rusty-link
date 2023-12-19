@@ -462,12 +462,6 @@ pub struct FrameStats {
     pub deficit: u64,
 }
 
-impl FrameStats {
-    fn new() -> Self {
-        Self { sent: 0, nulled: 0, deficit: 0 }
-    }
-}
-
 /// Collection of statistics reported by a node.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
