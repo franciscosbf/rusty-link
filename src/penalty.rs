@@ -6,7 +6,7 @@ use chrono::{Utc, DurationRound, Duration};
 use lru::LruCache;
 use tokio::sync::RwLock;
 
-use crate::models::Stats;
+use crate::models::NodeStats;
 
 type Events = [u64; 4];
 type Timestamp = i64;
@@ -59,7 +59,7 @@ impl PlayerPenalty {
         sum
     }
 
-    pub(crate) async fn penalty(&self, stats: Stats) -> u64 {
+    pub(crate) async fn penalty(&self, stats: NodeStats) -> u64 {
         let events = self.cumulative_events().await;
 
         let attempts = events[Attempt as usize];
