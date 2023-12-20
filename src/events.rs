@@ -2,7 +2,7 @@
 
 #![allow(dead_code)] // TODO: remove this.
 
-use futures_core::future::BoxFuture;
+use futures_util::future::BoxFuture;
 
 use tokio::sync::mpsc::Receiver;
 
@@ -66,7 +66,7 @@ pub struct WebSocketErrorEvent {
 ///
 /// Every method `on_*` uses [`tokio::sync::mpsc::Receiver`] internally.
 #[allow(missing_docs)]
-pub struct EventChannelRecvs<'a> {
+pub struct EventChannelReceivers<'a> {
     pub(crate) track_start_recv: Option<Receiver<TrackStartEvent<'a>>>,
     pub(crate) track_end_recv: Option<Receiver<TrackEndEvent<'a>>>,
     pub(crate) track_exception_recv: Option<Receiver<TrackExceptionEvent<'a>>>,
@@ -75,7 +75,7 @@ pub struct EventChannelRecvs<'a> {
     pub(crate) ws_error_recv: Option<Receiver<WebSocketErrorEvent>>,
 }
 
-impl<'a: 'static> EventChannelRecvs<'a> {
+impl<'a: 'static> EventChannelReceivers<'a> {
     fn dispatch_handler<F, T>(handler: F, mut channel: Receiver<T>)
     where
         T: 'a + Send,
@@ -99,7 +99,7 @@ impl<'a: 'static> EventChannelRecvs<'a> {
 
         let channel = self.track_start_recv.take().unwrap();
 
-        EventChannelRecvs::dispatch_handler(handler, channel);
+        EventChannelReceivers::dispatch_handler(handler, channel);
 
         true
     }
