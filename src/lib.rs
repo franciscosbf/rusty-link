@@ -10,7 +10,9 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub(crate) mod penalty;
+pub(crate) mod ops;
 
+pub mod events;
 pub mod utils;
 pub mod cache;
 pub mod models;
