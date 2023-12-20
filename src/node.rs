@@ -10,9 +10,9 @@ use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 use tokio::sync::{oneshot, RwLock};
 use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::tungstenite::{self, protocol::Message};
 
-use crate::error::NodeError;
+use crate::error::RustyError;
 use crate::models::{NodeStats, ApiError};
 use crate::player::Player;
 use crate::utils::InnerArc;
@@ -29,9 +29,10 @@ const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 /// Connection info used at node registration.
 #[allow(missing_docs)]
 pub struct NodeInfo {
-    /// Unique identifier used internally to query the node (it's what you
-    /// want).
+    /// Unique identifier used internally to query the node (it's what you want).
     pub name: NodeName,
+    /// Tells if we want to resume session after the socket has been closed.
+    pub preserve_session: bool,
     pub host: String,
     pub port: u16,
     pub secure: bool,
@@ -39,7 +40,11 @@ pub struct NodeInfo {
 }
 
 impl NodeInfo {
-    fn parse_url(&self, base: &str, path: &str) -> Result<Url, url::ParseError> {
+    fn parse_url(
+        &self,
+        base: &str,
+        path: &str
+    ) -> Result<Url, url::ParseError> {
         let raw = format!(
             "{}{}://{}:{}/v4{}", base,
             if self.secure { "s" } else { "" },
@@ -58,60 +63,65 @@ impl NodeInfo {
 }
 
 struct WebSocket {
-    request: Option<http::Request<()>>,
+    last_session_id: Option<String>,
     shutdown: Option<oneshot::Sender<()>>,
     handler: Option<JoinHandle<Result<(), tungstenite::Error>>>,
 }
 
-struct Stats {
-    data: NodeStats,
+impl WebSocket {
+    async fn start_ws() -> Result<(), RustyError> {
+
+
+        Ok(())
+    }
 }
 
-impl Stats {
-    fn new(stats: NodeStats) -> Self {
-        Self { data: stats }
+struct InternalStats {
+    data: Option<NodeStats>,
+}
+
+impl InternalStats {
+    fn new() -> Self {
+        Self { data: None }
     }
 
     /// Updates only if new uptime is greater than the current one.
     fn maybe_update(&mut self, new: &NodeStats) {
-        if self.data.uptime < new.uptime {
-            self.data = *new;
+        if self.data.is_none() {
+            self.data.replace(*new);
+            return;
+        }
+
+        if self.data.as_ref().unwrap().uptime < new.uptime {
+            self.data.replace(*new);
         }
     }
 }
 
+struct NodeConfig {
+    bot_user_id: BotId,
+    password: String,
+    keep_session: bool,
+    ws_url: Url,
+    rest_url: Url,
+}
+
 /// TODO:
 pub struct NodeRef {
-    base_rest_url: Url,
+    config: NodeConfig,
     client: reqwest::Client,
     ws: WebSocket,
     players: Arc<RwLock<HashMap<GuildId, Player>>>,
-    stats: Arc<RwLock<Stats>>,
+    stats: Arc<RwLock<InternalStats>>,
 }
 
 impl NodeRef {
-    fn new(
-        bot_user_id: BotId,
-        lavalink_password: String,
-        base_rest_url: Url,
-        base_ws_url: Url,
-        initial_stats: NodeStats, // TODO: returned at node creation.
-    ) -> Self {
-        // Build web socket client request.
-        let ws_request = http::Request::builder()
-            .uri(base_ws_url.as_str())
-            .header("User-Id", bot_user_id)
-            .header("Authorization", lavalink_password.clone())
-            .header("Client-Name", CLIENT_NAME.to_string())
-            .body(())
-            .unwrap();
-        let ws_request = Some(ws_request);
-
+    fn new(config: NodeConfig) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
         rest_headers.insert(
             "Authorization",
-            HeaderValue::from_str(&lavalink_password).unwrap()
+            HeaderValue::from_str(&config.password).unwrap()
         );
 
         // Build REST client.
@@ -120,27 +130,30 @@ impl NodeRef {
             .build()
             .expect(""); // TODO: write this msg.
 
+        // Finalize web socket state creation.
         let ws = WebSocket {
-            request: ws_request,
+            last_session_id: None,
+
+            // This fields are set by start_ws method.
             shutdown: None,
             handler: None
         };
 
         Self {
-            base_rest_url, client, ws,
+            config, client, ws,
             players: Arc::new(RwLock::new(HashMap::new())),
-            stats: Arc::new(RwLock::new(Stats::new(initial_stats)))
+            stats: Arc::new(RwLock::new(InternalStats::new()))
         }
     }
 
     /// TODO:
-    pub async fn get_stats(&self) -> Result<NodeStats, NodeError> {
-        let url = self.base_rest_url.join("stats").unwrap();
+    pub async fn get_stats(&self) -> Result<NodeStats, RustyError> {
+        let url = self.config.rest_url.join("stats").unwrap();
 
         match self.client.get(url).send().await {
             Ok(response) => {
                 if response.status() == reqwest::StatusCode::OK {
-                    match response.json::<NodeStats>().await {
+                    return match response.json::<NodeStats>().await {
                         Ok(stats) => {
                             // Tries to update the current uptime.
                             let mut current_stats = self.stats.write().await;
@@ -148,26 +161,99 @@ impl NodeRef {
 
                             Ok(stats)
                         },
-                        Err(_) => Err(NodeError::ParseError),
-                    }
-                } else {
-                    match response.json::<ApiError>().await {
-                        Ok(error) => Err(NodeError::InstanceError(error)),
-                        Err(_) => Err(NodeError::ParseError),
-                    }
+                        Err(e) => Err(RustyError::ParseError(e.to_string())),
+                    };
+                }
+
+                // Tries to parse the API error.
+                match response.json::<ApiError>().await {
+                    Ok(error) => Err(RustyError::InstanceError(error)),
+                    Err(e) => Err(RustyError::ParseError(e.to_string())),
                 }
             }
-            Err(e) => Err(NodeError::RequestError(e)),
+            Err(e) => Err(RustyError::RequestError(e)),
         }
     }
 
     // WARN: this function must be called only one time at node creation.
-    async fn start_ws(&mut self) -> Result<(), tungstenite::Error> {
-        let (mut stream, _) = tokio_tungstenite::connect_async(
-            self.ws.request.take().unwrap()
-        ).await?;
+    async fn start_ws(&mut self) -> Result<(), RustyError> {
+        // Build partial web socket client request.
+        let partial_request = http::Request::builder()
+            .uri(self.config.ws_url.as_str())
+            .header("User-Id", self.config.bot_user_id.clone())
+            .header("Authorization", self.config.password.clone())
+            .header("Client-Name", CLIENT_NAME.to_string());
+
+        // Build final request based on last session id and if we want to resume
+        // the current local state.
+        let last_session_id = &mut self.ws.last_session_id;
+        let keep_session = self.config.keep_session;
+        let request = if last_session_id.is_some() && keep_session {
+            let session_id = last_session_id
+                .take()
+                .unwrap();
+            partial_request
+                .header("Session-Id", session_id)
+                .body(())
+                .unwrap()
+        } else {
+            partial_request
+                .body(())
+                .unwrap()
+        };
+
+        let res = tokio_tungstenite::connect_async(request).await;
+        let (mut stream, _) = match res {
+            Ok(content) => content,
+            Err(e) => {
+                return Err(RustyError::WebSocketError(e));
+            }
+        };
 
         let (shutdown, mut rx) = oneshot::channel();
+
+        // Wait until ready op is received.
+        let item = stream.next().await;
+        let response = match item {
+            Some(res) => res,
+            None => {
+                return Err(RustyError::MissingReadyMessage);
+            }
+        };
+        // Fetch message.
+        let message: Message = match response {
+            Ok(msg) => msg,
+            Err(e) => {
+                return Err(RustyError::WebSocketError(e));
+            }
+        };
+        // Parse contents.
+        let raw: serde_json::Value = match message {
+            Message::Text(data) => {
+                match serde_json::from_str(data.as_str()) {
+                    Ok(content) => {
+                        if !matches!(content, serde_json::Value::Object(_)) {
+                            return Err(
+                                RustyError::ParseError(
+                                    "expecting json object".to_string()
+                                )
+                            );
+                        }
+
+                        content
+                    },
+                    Err(e) => {
+                        return Err(RustyError::ParseError(e.to_string()));
+                    }
+                }
+            }
+            Message::Close(_) => {
+                return Err(RustyError::ImmediateWebSocketClose);
+            }
+            _ => {
+                return Err(RustyError::MissingReadyMessage);
+            }
+        };
 
         let players = self.players.clone();
         let stats = self.stats.clone();
@@ -175,14 +261,28 @@ impl NodeRef {
         let handler = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = &mut rx => {
+                    _ = &mut rx => { // Got requested to close the connection.
                         return stream.close(None).await;
                     }
-                    msg = stream.next() => {
-                        // TODO: process message
-                        let _ = msg;
-                        let _ = players;
-                        let _ = stats;
+                    item = stream.next() => { // Process next item if any.
+                        if item.is_none(){ // We done were.
+                            return Ok(());
+                        }
+
+                        let res = item.unwrap();
+                        match res {
+                            Ok(message) => {
+                                // TODO: process message.
+                                let _ = message;
+                                let _ = players;
+                                let _ = stats;
+                            },
+                            Err(e) => { // Something went wrong.
+                                let _ = e;
+                                // Dispatch an event about this.
+                                // TODO: notify error.
+                            }
+                        }
                     }
                 };
             }
@@ -242,7 +342,7 @@ impl NodeManagerRef {
         }
     }
 
-    async fn select_node(&self) -> Result<Node, NodeError> {
+    async fn select_node(&self) -> Result<Node, RustyError> {
         todo!()
     }
 
@@ -254,7 +354,7 @@ impl NodeManagerRef {
     pub async fn add_node(
         &self,
         info: NodeInfo
-    ) -> Result<(), NodeError> {
+    ) -> Result<(), RustyError> {
         todo!()
     }
 
@@ -262,21 +362,21 @@ impl NodeManagerRef {
     pub async fn get_node(
         &self,
         name: NodeName,
-    ) -> Result<Node, NodeError> {
+    ) -> Result<Node, RustyError> {
         todo!()
     }
 
     /// TODO:
     pub async fn remove_node(
         name: NodeName
-    ) -> Result<(), NodeError> {
+    ) -> Result<(), RustyError> {
         todo!()
     }
 
     /// TODO:
     pub async fn get_player(
         &self, guild: GuildId
-    ) -> Result<Player, NodeError> {
+    ) -> Result<Player, RustyError> {
         // TODO: creates it if not present.
         todo!()
     }
@@ -284,7 +384,7 @@ impl NodeManagerRef {
     /// TODO:
     pub async fn remove_player(
         &self, guild: GuildId
-    ) -> Result<(), NodeError> {
+    ) -> Result<(), RustyError> {
         todo!()
     }
 
