@@ -483,6 +483,54 @@ pub struct NodeStats {
     pub frame_stats: Option<FrameStats>,
 }
 
+/// Why the track ended.
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(tag = "reason")]
+#[allow(missing_docs)]
+pub enum TrackEndReason {
+    #[serde(rename = "finished")]
+    Finished,
+    #[serde(rename = "loadFailed")]
+    LoadFailed,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "replaced")]
+    Replaced,
+    #[serde(rename = "cleanup")]
+    Cleanup,
+}
+
+/// Severity of the track exception.
+#[derive(Deserialize, Debug, Clone, Copy)]
+#[serde(tag = "severity")]
+pub enum TrackExceptionSeverity {
+    /// The cause is known and expected, indicates that there is nothing wrong
+    /// with the library itself.
+    #[serde(rename = "common")]
+    Common,
+    /// The cause might not be exactly known, but is possibly caused by outside
+    /// factors. For example when an outside service responds in a format that
+    /// we do not expect
+    #[serde(rename = "suspicious")]
+    Suspicious,
+    /// The probable cause is an issue with the library or there is no way to
+    /// tell what the cause might be. This is the default level and other levels
+    /// are used in cases where the thrower has more in-depth knowledge about
+    /// the error
+    #[serde(rename = "fault")]
+    Fault,
+}
+
+/// Track exception thrown while trying to play some track.
+#[derive(Deserialize, Debug)]
+#[allow(missing_docs)]
+pub struct TrackException {
+    pub message: Option<String>,
+    #[serde(flatten)]
+    pub severity: TrackExceptionSeverity,
+    pub cause: String,
+}
+
 // TODO: route planners data...
 
 // ############### Deserialization Utils ###############
