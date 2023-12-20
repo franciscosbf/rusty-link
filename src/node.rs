@@ -1,4 +1,4 @@
-//!
+//! TODO:
 
 #![allow(dead_code)] // TODO: remove this.
 
@@ -29,7 +29,8 @@ const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 /// Connection info used at node registration.
 #[allow(missing_docs)]
 pub struct NodeInfo {
-    /// Unique identifier used internally to query the node (it's what you want).
+    /// Unique identifier used internally to query the node (it's what you
+    /// want).
     pub name: NodeName,
     /// Tells if we want to resume session after the socket has been closed.
     pub preserve_session: bool,
@@ -133,13 +134,17 @@ struct NodeConfig {
     rest_url: Url,
 }
 
+struct NodeState {
+    players: RwLock<HashMap<GuildId, Player>>,
+    stats: RwLock<InternalStats>,
+}
+
 /// TODO:
 pub struct NodeRef {
     config: NodeConfig,
     client: reqwest::Client,
     ws: WebSocket,
-    players: Arc<RwLock<HashMap<GuildId, Player>>>,
-    stats: Arc<RwLock<InternalStats>>,
+    state: Arc<NodeState>,
 }
 
 impl NodeRef {
@@ -166,11 +171,13 @@ impl NodeRef {
             handler: None
         };
 
-        Self {
-            config, client, ws,
-            players: Arc::new(RwLock::new(HashMap::new())),
-            stats: Arc::new(RwLock::new(InternalStats::new()))
-        }
+        // Initialize internal state shared with the socket.
+        let state = Arc::new(NodeState {
+            players: RwLock::new(HashMap::new()),
+            stats: RwLock::new(InternalStats::new())
+        });
+
+        Self { config, client, ws, state }
     }
 
     /// TODO:
@@ -183,7 +190,9 @@ impl NodeRef {
                     return match response.json::<NodeStats>().await {
                         Ok(stats) => {
                             // Tries to update the current uptime.
-                            let mut current_stats = self.stats.write().await;
+                            let mut current_stats = self.state.stats
+                                .write()
+                                .await;
                             current_stats.maybe_update(&stats);
 
                             Ok(stats)
@@ -258,9 +267,7 @@ impl NodeRef {
         };
         // TODO: parse event.
 
-        // Prepare necessary structures used by the web socket reader.
-        let players = self.players.clone();
-        let stats = self.stats.clone();
+        let state = self.state.clone();
 
         // Launch web socket reader.
         let handler = tokio::spawn(async move {
@@ -270,7 +277,7 @@ impl NodeRef {
                         return stream.close(None).await;
                     }
                     item = stream.next() => { // Process next item if any.
-                        if item.is_none(){ // We done were.
+                        if item.is_none() { // We done were.
                             return Ok(());
                         }
 
@@ -279,8 +286,8 @@ impl NodeRef {
                             Ok(message) => {
                                 // TODO: process message.
                                 let _ = message;
-                                let _ = players;
-                                let _ = stats;
+                                let _ = state.players;
+                                let _ = state.stats;
                             },
                             Err(e) => { // Something went wrong.
                                 let _ = e;
