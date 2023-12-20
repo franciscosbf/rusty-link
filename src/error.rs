@@ -8,6 +8,7 @@ use std::{fmt::{Display, Debug}, error::Error};
 
 use crate::models::ApiError;
 
+/// Parse error description.
 pub type ParseDescription = String;
 
 /// Collection of errors that [NodeManager](crate::node::NodeManager) might
@@ -26,17 +27,19 @@ pub enum RustyError {
     Missing,
     /// The response content is corrupted.
     ParseError(ParseDescription),
-    /// If after establishing the web socket connection, the server didn't send
-    /// a confirmation message.
-    MissingReadyMessage,
     /// The client received an error response from the node.
     InstanceError(ApiError),
     /// The returned error isn't related to some node operation.
     RequestError(reqwest::Error),
     /// The web socket connection returned an error.
     WebSocketError(tungstenite::Error),
+    /// If after establishing the web socket connection, the server didn't send
+    /// a confirmation message.
+    MissingReadyMessage,
     /// The web socket returned an unexpected close message.
     ImmediateWebSocketClose,
+    /// When the received message from web socket isn't of type text.
+    UnexpectedMessage,
 }
 
 impl Display for RustyError {
@@ -52,16 +55,18 @@ impl Display for RustyError {
                 write!(f, "missing node"),
             RustyError::ParseError(ref desc) =>
                 write!(f, "corrupted message: {}", desc),
-            RustyError::MissingReadyMessage =>
-                write!(f, "ready message not received by web socket server"),
             RustyError::InstanceError(ref error) =>
                 <ApiError as Display>::fmt(error, f),
             RustyError::RequestError(ref error) =>
                 <reqwest::Error as Display>::fmt(error, f),
             RustyError::WebSocketError(ref error) =>
                 <tungstenite::Error as Display>::fmt(error, f),
+            RustyError::MissingReadyMessage =>
+                write!(f, "ready message not received by web socket server"),
             RustyError::ImmediateWebSocketClose =>
                 write!(f, "web socket sent an unexpected close message"),
+                RustyError::UnexpectedMessage =>
+                write!(f, "got unexpected message from web socket"),
         }
     }
 }

@@ -69,10 +69,37 @@ struct WebSocket {
 }
 
 impl WebSocket {
-    async fn start_ws() -> Result<(), RustyError> {
+    async fn process_message(
+        result: Result<Message, tungstenite::Error>
+    ) -> Result<Option<serde_json::Value>, RustyError> {
+        // Fetch message.
+        let message: Message = match result {
+            Ok(msg) => msg,
+            Err(e) => {
+                return Err(RustyError::WebSocketError(e));
+            }
+        };
+        // Parse contents.
+        match message {
+            Message::Text(data) => {
+                match serde_json::from_str(data.as_str()) {
+                    Ok(content) => {
+                        if !matches!(content, serde_json::Value::Object(_)) {
+                            return Err(
+                                RustyError::ParseError(
+                                    "expecting json object".to_string()
+                                )
+                            );
+                        }
 
-
-        Ok(())
+                        Ok(Some(content))
+                    },
+                    Err(e) => Err(RustyError::ParseError(e.to_string()))
+                }
+            }
+            Message::Close(_) => Err(RustyError::ImmediateWebSocketClose),
+            _ => Ok(None),
+        }
     }
 }
 
@@ -188,7 +215,8 @@ impl NodeRef {
         // the current local state.
         let last_session_id = &mut self.ws.last_session_id;
         let keep_session = self.config.keep_session;
-        let request = if last_session_id.is_some() && keep_session {
+        let resume_session = last_session_id.is_some() && keep_session;
+        let request = if resume_session {
             let session_id = last_session_id
                 .take()
                 .unwrap();
@@ -203,7 +231,7 @@ impl NodeRef {
         };
 
         let res = tokio_tungstenite::connect_async(request).await;
-        let (mut stream, _) = match res {
+        let (mut stream, _ /* handle response ??? */) = match res {
             Ok(content) => content,
             Err(e) => {
                 return Err(RustyError::WebSocketError(e));
@@ -212,52 +240,29 @@ impl NodeRef {
 
         let (shutdown, mut rx) = oneshot::channel();
 
-        // Wait until ready op is received.
+        // Wait until first item is received (client is expecting ready op).
         let item = stream.next().await;
-        let response = match item {
+        let result = match item {
             Some(res) => res,
             None => {
                 return Err(RustyError::MissingReadyMessage);
             }
         };
-        // Fetch message.
-        let message: Message = match response {
-            Ok(msg) => msg,
-            Err(e) => {
-                return Err(RustyError::WebSocketError(e));
-            }
-        };
-        // Parse contents.
-        let raw: serde_json::Value = match message {
-            Message::Text(data) => {
-                match serde_json::from_str(data.as_str()) {
-                    Ok(content) => {
-                        if !matches!(content, serde_json::Value::Object(_)) {
-                            return Err(
-                                RustyError::ParseError(
-                                    "expecting json object".to_string()
-                                )
-                            );
-                        }
 
-                        content
-                    },
-                    Err(e) => {
-                        return Err(RustyError::ParseError(e.to_string()));
-                    }
-                }
-            }
-            Message::Close(_) => {
-                return Err(RustyError::ImmediateWebSocketClose);
-            }
-            _ => {
+        // Parse the raw value to be checked right after.
+        let value = match WebSocket::process_message(result).await? {
+            Some(val) => val,
+            None => {
                 return Err(RustyError::MissingReadyMessage);
             }
         };
+        // TODO: parse event.
 
+        // Prepare necessary structures used by the web socket reader.
         let players = self.players.clone();
         let stats = self.stats.clone();
 
+        // Launch web socket reader.
         let handler = tokio::spawn(async move {
             loop {
                 tokio::select! {
