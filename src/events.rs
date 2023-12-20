@@ -88,7 +88,16 @@ impl<'a: 'static> EventChannelReceivers<'a> {
         });
     }
 
-    /// Returns a stream to receive the next [`TrackStartEvent`].
+    /// Registers an handler for [`TrackStartEvent`].
+    ///
+    /// TODO: explain the remaining about handler and give an example
+    /// Each code block must have (no_run indicator):
+    ///
+    /// ```no_run
+    /// loop {
+    ///     println!("Hello, world");
+    /// }
+    /// ```
     pub fn on_track_start<F>(&'a mut self, handler: F) -> bool
     where
         F: 'a + Send + Clone + FnOnce(TrackStartEvent<'a>) -> BoxFuture<'a, ()>,
