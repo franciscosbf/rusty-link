@@ -4,8 +4,6 @@
 
 use futures_util::future::BoxFuture;
 
-use tokio::sync::mpsc::Receiver;
-
 use crate::node::Node;
 use crate::error::RustyError;
 use crate::player::Player;
@@ -62,98 +60,36 @@ pub struct WebSocketErrorEvent {
     pub error: RustyError,
 }
 
-/// Channel receivers per event type.
-///
-/// Every method `on_*` uses [`tokio::sync::mpsc::Receiver`] internally.
-#[allow(missing_docs)]
-pub struct EventChannelReceivers<'a> {
-    pub(crate) track_start_recv: Option<Receiver<TrackStartEvent<'a>>>,
-    pub(crate) track_end_recv: Option<Receiver<TrackEndEvent<'a>>>,
-    pub(crate) track_exception_recv: Option<Receiver<TrackExceptionEvent<'a>>>,
-    pub(crate) track_stuck_recv: Option<Receiver<TrackStuckEvent<'a>>>,
-    pub(crate) ws_closed_recv: Option<Receiver<WebSocketClosedEvent>>,
-    pub(crate) ws_error_recv: Option<Receiver<WebSocketErrorEvent>>,
+/// TODO: explain how to create handler.
+pub trait EventHandlers<'a> {
+    /// Receives the next [`TrackStartEvent`].
+    fn on_track_start(&self, event: TrackStartEvent<'a>) -> BoxFuture<'a, ()>;
+    /// Receives the next [`TrackEndEvent`].
+    fn on_track_end(&self, event: TrackEndEvent<'a>) -> BoxFuture<'a, ()>;
+    /// Receives the next [`TrackExceptionEvent`].
+    fn on_track_exception(&self, event: TrackEndEvent<'a>) -> BoxFuture<'a, ()>;
+    /// Receives the next [`TrackStuckEvent`].
+    fn on_track_stuck(&self, event: TrackStuckEvent<'a>) -> BoxFuture<'a, ()>;
+    /// Receives the next [`WebSocketClosedEvent`].
+    fn on_ws_closed(&self, event: WebSocketClosedEvent) -> BoxFuture<'a, ()>;
+    /// Receives the next [`WebSocketError`].
+    fn on_ws_error(&self, event: WebSocketClosedEvent) -> BoxFuture<'a, ()>;
 }
 
-impl<'a: 'static> EventChannelReceivers<'a> {
-    fn dispatch_handler<F, T>(handler: F, mut channel: Receiver<T>)
-    where
-        T: 'a + Send,
-        F: 'a + Send + Clone + FnOnce(T) -> BoxFuture<'a, ()>,
-    {
-        tokio::spawn(async move {
-            while let Some(event) = channel.recv().await {
-                tokio::spawn(handler.clone()(event));
-            }
-        });
-    }
-
-    /// Registers an handler for [`TrackStartEvent`].
-    ///
-    /// TODO: explain the remaining about handler and give an example
-    /// Each code block must have (no_run indicator):
-    ///
-    /// ```no_run
-    /// loop {
-    ///     println!("Hello, world");
-    /// }
-    /// ```
-    pub fn on_track_start<F>(&'a mut self, handler: F) -> bool
-    where
-        F: 'a + Send + Clone + FnOnce(TrackStartEvent<'a>) -> BoxFuture<'a, ()>,
-    {
-        if self.track_start_recv.is_none() {
-            return false;
-        }
-
-        let channel = self.track_start_recv.take().unwrap();
-
-        EventChannelReceivers::dispatch_handler(handler, channel);
-
-        true
-    }
-
-    fn f(&'a mut self) { // TODO: remove and explain this in a comment.
-        use std::sync::Arc;
-        let a = Arc::new(1);
-        let b = a.clone();
-        use futures_util::FutureExt;
-        let h = |event: TrackStartEvent<'_>| async move { let _ = event.track.encoded; println!("{b}"); }.boxed();
-        self.on_track_start(h);
-    }
-
-    // /// Receives the next [`TrackEndEvent`].
-    // pub fn on_track_end(
-    //     &mut self
-    // ) -> impl Future<Output = Option<TrackEndEvent<'a>>> + '_ {
-    //     self.track_end_receiver.recv()
-    // }
-    //
-    // /// Receives the next [`TrackExceptionEvent`].
-    // pub fn on_track_exception(
-    //     &mut self
-    // ) -> impl Future<Output = Option<TrackExceptionEvent<'a>>> + '_ {
-    //     self.track_exception_receiver.recv()
-    // }
-    //
-    // /// Receives the next [`TrackStuckEvent`].
-    // pub fn on_track_stuck(
-    //     &mut self
-    // ) -> impl Future<Output = Option<TrackStuckEvent<'a>>> + '_ {
-    //     self.track_stuck_receiver.recv()
-    // }
-    //
-    // /// Receives the next [`WebSocketClosedEvent`].
-    // pub fn on_web_socket_closed(
-    //     &mut self
-    // ) -> impl Future<Output = Option<WebSocketClosedEvent>> + '_ {
-    //     self.ws_closed_receiver.recv()
-    // }
-    //
-    // /// Receives the next [`WebSocketError`].
-    // pub fn on_ws_error(
-    //     &mut self
-    // ) -> impl Future<Output = Option<WebSocketErrorEvent>> + '_ {
-    //     self.ws_error_receiver.recv()
-    // }
+/// Processes the event with the given handler in a different task.
+pub(crate) fn dispatch_event<'a: 'static, T>(
+    event: T,
+    handler: fn(T) -> BoxFuture<'a, ()>
+) {
+    tokio::spawn(handler(event));
 }
+
+// fn f() {
+//     struct A<'a> {s: &'a str}
+//     fn handler<'a>(a: A) -> BoxFuture<'a, ()> {
+//         async move {
+//             let _ = a;
+//         }.boxed()
+//     }
+//     dispatch_event(A {s: ""}, handler);
+// }
