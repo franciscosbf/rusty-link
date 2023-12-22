@@ -75,33 +75,118 @@ pub struct WebSocketErrorEvent {
 
 impl Event for WebSocketErrorEvent { }
 
-/// TODO: explain how to create handler.
+/// Skeleton of event handlers.
+///
+/// Events are dispatched (i.e. calls to `EventHandlers::on_*`) as soon as their
+/// are parsed and validated right after the web socket client has received them.
+///
+/// # Event Handlers Scheduling
+///
+/// Returned event handlers (i.e. boxed futures) aren't run in a deterministic
+/// order. It's up to how the tokio runtime schedules each future.
+///
+/// # Performance Considerations
+///
+/// Most likely each `EventHandlers::on_*` has to do some setup before returning
+/// the proper event handler. Try to minimize the impact of those operations,
+/// otherwise you may end up flooding the internal dispatcher.
+///
+/// # Example
+///
+/// ```
+/// # use std::sync::Arc;
+/// # use rusty_link::event::*;
+/// // FutureExt trait extension is necessary to get access to `boxed` method.
+/// use futures_util::future::{BoxFuture, FutureExt};
+///
+/// # struct BotState { }
+/// # impl<'a> BotState {
+/// #     async fn register_started_track(&self, _ :TrackStartEvent<'a>) { }
+/// # }
+/// struct Handlers {
+///     bot_state: Arc<BotState>,
+/// }
+///
+/// impl<'a: 'static> EventHandlers<'a> for Handlers {
+///     fn on_track_start(
+///         &self,
+///         event: TrackStartEvent<'a>
+///     ) -> BoxFuture<'static, ()> {
+///         let state = self.bot_state.clone();
+///
+///         async move {
+///             state.register_started_track(event).await;
+///         }.boxed()
+///     }
+///
+///     // The same goes for the reamining handlers...
+///     # fn on_track_end(
+///     #     &self,
+///     #     _: TrackEndEvent<'a>
+///     # ) -> BoxFuture<'static, ()> {
+///     #     async { }.boxed()
+///     # }
+///     #
+///     # fn on_track_exception(
+///     #     &self,
+///     #     _: TrackExceptionEvent<'a>
+///     # ) -> BoxFuture<'static, ()> {
+///     #     async { }.boxed()
+///     # }
+///     #
+///     # fn on_track_stuck(
+///     #     &self,
+///     #     _: TrackStuckEvent<'a>
+///     # ) -> BoxFuture<'static, ()> {
+///     #     async { }.boxed()
+///     # }
+///     #
+///     # fn on_ws_closed(
+///     #     &self,
+///     #     _: WebSocketClosedEvent
+///     # ) -> BoxFuture<'static, ()> {
+///     #     async { }.boxed()
+///     # }
+///     #
+///     # fn on_ws_error(
+///     #     &self,
+///     #     _: WebSocketErrorEvent
+///     # ) -> BoxFuture<'static, ()> {
+///     #     async {}.boxed()
+///     # }
+/// }
+/// ```
 pub trait EventHandlers<'a> {
     /// Receives the next [`TrackStartEvent`].
     fn on_track_start(
         &self,
         event: TrackStartEvent<'a>
     ) -> BoxFuture<'static, ()>;
+
     /// Receives the next [`TrackEndEvent`].
     fn on_track_end(
         &self,
         event: TrackEndEvent<'a>
     ) -> BoxFuture<'static, ()>;
+
     /// Receives the next [`TrackExceptionEvent`].
     fn on_track_exception(
         &self,
         event: TrackExceptionEvent<'a>
     ) -> BoxFuture<'static, ()>;
+
     /// Receives the next [`TrackStuckEvent`].
     fn on_track_stuck(
         &self,
         event: TrackStuckEvent<'a>
     ) -> BoxFuture<'static, ()>;
+
     /// Receives the next [`WebSocketClosedEvent`].
     fn on_ws_closed(
         &self,
         event: WebSocketClosedEvent
     ) -> BoxFuture<'static, ()>;
+
     /// Receives the next [`WebSocketErrorEvent`].
     fn on_ws_error(
         &self,
