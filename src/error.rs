@@ -11,8 +11,7 @@ use crate::model::ApiError;
 /// Parse error description.
 pub type ParseDescription = String;
 
-/// Collection of errors that [NodeManager](crate::node::NodeManager) might
-/// return in some of its methods.
+/// Client API errors.
 #[derive(Debug)]
 pub enum RustyError {
     /// When selecting a node for a given Discord guild, this value is returned
