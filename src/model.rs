@@ -330,12 +330,12 @@ pub struct ChannelMix {
     pub right_to_right: Option<f64>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-#[allow(dead_code)]
 /// Higher frequencies get suppressed, while lower frequencies pass through this
 /// filter, thus the name low pass.
 ///
 /// Any smoothing values <= 1.0 will disable the filter.
+#[derive(Deserialize, Serialize, Debug)]
+#[allow(dead_code)]
 pub struct LowPass {
     /// Smoothing must be > 1.0 if you pretend to keep it active.
     #[serde(skip_serializing_if = "Option::is_none")]
