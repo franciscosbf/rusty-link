@@ -14,7 +14,7 @@ use serde_json::value::RawValue;
 
 // ############### Types ###############
 
-/// Guild Identifier
+/// Guild Identifier.
 type GuildId = String;
 /// Milliseconds representation.
 pub type Milli = u64;
