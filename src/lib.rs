@@ -10,13 +10,13 @@
 #![doc(test(attr(deny(warnings))))]
 
 pub(crate) mod penalty;
-pub(crate) mod ops;
+pub(crate) mod op;
 
-pub mod events;
+pub mod event;
 pub mod utils;
 pub mod cache;
-pub mod models;
-pub mod filters;
+pub mod model;
+pub mod filter;
 pub mod node;
 pub mod player;
 pub mod queue;
