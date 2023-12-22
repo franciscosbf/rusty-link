@@ -212,55 +212,82 @@ impl NodeRef {
     }
 
     // WARN: this function must be called only one time at node creation.
-    async fn start_ws(&mut self) -> Result<(), RustyError> {
+    async fn start_ws(&mut self) -> Result<bool, RustyError> {
         // Build partial web socket client request.
-        let partial_request = http::Request::builder()
+        let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
-            .header("User-Id", self.config.bot_user_id.clone())
-            .header("Authorization", self.config.password.clone())
-            .header("Client-Name", CLIENT_NAME.to_string());
+            .header("User-Id", self.config.bot_user_id.as_str())
+            .header("Authorization", self.config.password.as_str())
+            .header("Client-Name", CLIENT_NAME);
 
-        // Build final request based on last session id and if we want to resume
-        // the current local state.
+        // Build request based on last session id (if any) and if we want to
+        // resume the current local state.
         let last_session_id = &mut self.ws.last_session_id;
         let keep_session = self.config.keep_session;
-        let resume_session = last_session_id.is_some() && keep_session;
-        let request = if resume_session {
+        if last_session_id.is_some() && keep_session {
             let session_id = last_session_id
-                .take()
+                .as_ref() // Get session as reference since it may be restored.
                 .unwrap();
-            partial_request
-                .header("Session-Id", session_id)
-                .body(())
-                .unwrap()
-        } else {
-            partial_request
-                .body(())
-                .unwrap()
-        };
+            request_builder = request_builder
+                .header("Session-Id", session_id);
+        }
+        let request = request_builder
+            .body(())
+            .unwrap();
 
+        // Try to stablish a connection.
         let res = tokio_tungstenite::connect_async(request).await;
-        let (mut stream, _ /* handle response ??? */) = match res {
+        let (mut stream, response) = match res {
             Ok(content) => content,
             Err(e) => {
                 return Err(RustyError::WebSocketError(e));
             }
         };
 
-        let (shutdown, mut rx) = oneshot::channel();
-
-        // Wait until first item is received (client is expecting ready op).
+        // Wait until the first item is received (client is expecting ready op).
         let item = stream.next().await;
         let result = match item {
             Some(res) => res,
             None => {
+                let _ = stream.close(None).await;
                 return Err(RustyError::MissingReadyMessage);
             }
         };
 
         // Parse the raw value to be checked right after.
-        let value = match WebSocket::process_message(result).await? {
-            Some(val) => val,
+        let resumed_session = match WebSocket::process_message(result).await? {
+            Some(raw) => {
+                // TODO: serde parse with ReadyOp.
+                let op = raw
+                    .get("op")
+                    .unwrap()
+                    .as_str()
+                    .unwrap();
+                if op != "ready" {
+                    return Err(RustyError::MissingReadyMessage);
+                }
+
+                // Check if node state was restored despite of sending or not
+                // the previous session identifier.
+                let resumed = response
+                    .headers()
+                    .get("Session-Id")
+                    .map(|raw| Some(matches!(raw.as_bytes(), b"true")))
+                    .is_some();
+
+                // Fetch session id if not restored.
+                if !resumed {
+                    let new_session_id = raw
+                        .get("sessionId")
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_string();
+                    *last_session_id = Some(new_session_id);
+                }
+
+                resumed
+            },
             None => {
                 return Err(RustyError::MissingReadyMessage);
             }
@@ -268,6 +295,7 @@ impl NodeRef {
         // TODO: parse event.
 
         let state = self.state.clone();
+        let (shutdown, mut rx) = oneshot::channel();
 
         // Launch web socket reader.
         let handler = tokio::spawn(async move {
@@ -304,7 +332,7 @@ impl NodeRef {
         self.ws.shutdown = Some(shutdown);
         self.ws.handler = Some(handler);
 
-        Ok(())
+        Ok(resumed_session)
     }
 
     // WARN: this function must be called only one time at node removal.
