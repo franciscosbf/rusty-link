@@ -7,7 +7,7 @@ use futures_util::future::BoxFuture;
 use crate::node::Node;
 use crate::error::RustyError;
 use crate::player::Player;
-use crate::models::{TrackData, TrackEndReason, Milli, TrackException};
+use crate::model::{TrackData, TrackEndReason, Milli, TrackException};
 
 /// Event tag.
 pub(crate) trait Event { }

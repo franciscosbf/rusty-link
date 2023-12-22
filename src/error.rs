@@ -6,7 +6,7 @@ use tokio_tungstenite::tungstenite;
 
 use std::{fmt::{Display, Debug}, error::Error};
 
-use crate::models::ApiError;
+use crate::model::ApiError;
 
 /// Parse error description.
 pub type ParseDescription = String;

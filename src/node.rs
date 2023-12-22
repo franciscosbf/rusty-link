@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::{self, protocol::Message};
 
 use crate::error::RustyError;
-use crate::models::{NodeStats, ApiError};
+use crate::model::{NodeStats, ApiError};
 use crate::player::Player;
 use crate::utils::InnerArc;
 

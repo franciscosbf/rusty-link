@@ -6,7 +6,7 @@ use chrono::{Utc, DurationRound, Duration};
 use lru::LruCache;
 use tokio::sync::RwLock;
 
-use crate::models::NodeStats;
+use crate::model::NodeStats;
 
 type Events = [u64; 4];
 type Timestamp = i64;
