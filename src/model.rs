@@ -14,6 +14,8 @@ use serde_json::value::RawValue;
 
 // ############### Types ###############
 
+/// Guild Identifier
+type GuildId = String;
 /// Milliseconds representation.
 pub type Milli = u64;
 /// HTTP status code.
@@ -409,7 +411,7 @@ pub struct PlayerFilters<'a> {
 pub struct PlayerData<'a> {
     /// The player guild identifier.
     #[serde(rename = "guildId")]
-    pub guild_id: String,
+    pub guild_id: GuildId,
     /// The track that is currently playing, if any.
     pub track: Option<TrackInfo>,
     /// Current player volume (0 to 1000).
