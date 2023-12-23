@@ -12,7 +12,7 @@ use crate::model::{TrackData, TrackEndReason, Milli, TrackException};
 /// Event tag.
 pub(crate) trait Event { }
 
-/// Dispatched when a track starts playing
+/// Dispatched when a track starts playing.
 #[allow(missing_docs)]
 pub struct TrackStartEvent<'a> {
     /// Player where a track starts playing.
@@ -22,7 +22,7 @@ pub struct TrackStartEvent<'a> {
 
 impl<'a> Event for TrackStartEvent<'a> { }
 
-/// Dispatched when a track ends
+/// Dispatched when a track ends.
 #[allow(missing_docs)]
 pub struct TrackEndEvent<'a> {
     /// Player where a track ended.
@@ -33,7 +33,7 @@ pub struct TrackEndEvent<'a> {
 
 impl<'a> Event for TrackEndEvent<'a> { }
 
-/// Dispatched when a track throws an exception
+/// Dispatched when a track throws an exception.
 #[allow(missing_docs)]
 pub struct TrackExceptionEvent<'a> {
     /// Player where a track dispatched an exception.
@@ -44,7 +44,7 @@ pub struct TrackExceptionEvent<'a> {
 
 impl<'a> Event for TrackExceptionEvent<'a> { }
 
-/// Dispatched when a track gets stuck while playing
+/// Dispatched when a track gets stuck while playing.
 #[allow(missing_docs)]
 pub struct TrackStuckEvent<'a> {
     /// Player where the track got stuck.
