@@ -67,14 +67,7 @@ pub(crate) struct EventOp {
     #[serde(rename = "guildId")]
     pub(crate) guild_id: GuildId,
     #[serde(flatten)]
-    event: EventType,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(tag = "op")]
-pub(crate) enum OpTypeOnly {
-    #[serde(rename = "ready")]
-    Ready(ReadyOp),
+    pub(crate) event: EventType,
 }
 
 // TODO: remaining operations.
@@ -85,10 +78,10 @@ pub(crate) enum OpType {
     #[serde(rename = "ready")]
     Ready(ReadyOp),
     #[serde(rename = "playerUpdate")]
-    PlayerUpdate,
+    PlayerUpdate(UpdateOp),
     #[serde(rename = "stats")]
-    Stats,
+    Stats(Box<StatsOp>),
     #[serde(rename = "event")]
-    Event,
+    Event(Box<EventOp>),
 }
 
