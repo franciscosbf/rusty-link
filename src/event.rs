@@ -54,7 +54,7 @@ pub struct TrackStuckEvent {
     pub threshold: Milli,
 }
 
-impl<'a> Event for TrackStuckEvent { }
+impl Event for TrackStuckEvent { }
 
 /// Dispatched when the websocket connection to Discord voice servers is closed.
 pub struct WebSocketClosedEvent {
