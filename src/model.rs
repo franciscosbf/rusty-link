@@ -28,6 +28,8 @@ pub type FilterVolume = f64;
 pub type BoxedRawData= Box<RawValue>;
 /// Plugin identifier.
 pub type PluginName = String;
+/// Discord close event code.
+pub type CloseEventCode = u16;
 
 // ############### Models ###############
 
@@ -508,6 +510,17 @@ pub struct TrackException {
     #[serde(flatten)]
     pub severity: TrackExceptionSeverity,
     pub cause: String,
+}
+
+/// Describes the reason by a node audio websocket to Discord was closed.
+#[derive(Deserialize, Debug)]
+#[allow(missing_docs)]
+pub struct DiscordAudioWsClosed {
+    pub code: CloseEventCode,
+    pub reason: String,
+    /// Whether the connection was closed by Discord.
+    #[serde(rename = "byRemote")]
+    pub remote: bool,
 }
 
 // TODO: route planners data...
