@@ -70,8 +70,6 @@ pub(crate) struct EventOp {
     pub(crate) event: EventType,
 }
 
-// TODO: remaining operations.
-
 #[derive(Deserialize, Debug)]
 #[serde(tag = "op")]
 pub(crate) enum OpType {
