@@ -7,7 +7,7 @@ use futures_util::future::BoxFuture;
 use crate::node::Node;
 use crate::error::RustyError;
 use crate::player::Player;
-use crate::model::{TrackData, TrackEndReason, Milli, TrackException};
+use crate::model::{TrackData, TrackEndReason, Milli, TrackException, DiscordAudioWsClosed};
 
 /// Event tag.
 pub(crate) trait Event { }
@@ -56,10 +56,12 @@ pub struct TrackStuckEvent {
 
 impl Event for TrackStuckEvent { }
 
-/// Dispatched when the websocket connection to Discord voice servers is closed.
+/// Dispatched when the websocket audio connection to Discord is closed.
 pub struct DiscordWsClosedEvent {
     /// Node where the web socket was closed.
     pub node: Node,
+    /// Explanation on why the audio web socket was closed.
+    pub description: DiscordAudioWsClosed,
 }
 
 impl Event for DiscordWsClosedEvent { }
