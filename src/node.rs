@@ -211,8 +211,8 @@ impl NodeRef {
         }
     }
 
-    // WARN: this function must be called only one time at node creation.
-    async fn start_ws(&mut self) -> Result<bool, RustyError> {
+    /// TODO:
+    pub async fn connect(&mut self) -> Result<bool, RustyError> {
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
