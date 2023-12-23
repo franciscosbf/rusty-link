@@ -25,7 +25,9 @@ pub type Volume = u16;
 /// Player filter volume adjustment.
 pub type FilterVolume = f64;
 /// Unparsed json (i.e. stills in raw format).
-pub type RawData<'a> = &'a RawValue;
+pub type BoxedRawData= Box<RawValue>;
+/// Plugin identifier.
+pub type PluginName = String;
 
 // ############### Models ###############
 
@@ -90,20 +92,18 @@ pub struct TrackInfo {
 /// Contains the decoded track metadata.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct TrackData<'a> {
+pub struct TrackData {
     /// The track unique identifier.
     pub encoded: String,
     /// The track description.
     pub info: TrackInfo,
     /// Aditional info that may be injected by some plugin.
     #[serde(rename = "pluginInfo")]
-    #[serde(borrow)]
-    pub plugin_info: RawData<'a>,
+    pub plugin_info: BoxedRawData,
     /// Additional user data that might have been sent in the update player
     /// endpoint.
     #[serde(rename = "userData")]
-    #[serde(borrow)]
-    pub user_data: RawData<'a>,
+    pub user_data: BoxedRawData,
 }
 
 /// Contains the playlist info.
@@ -121,32 +121,30 @@ pub struct PlaylistInfo {
 /// Contains the decoded playlist metadata.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct PlaylistData<'a> {
+pub struct PlaylistData {
     /// The playlist info.
     info: PlaylistInfo,
     /// Aditional info that may be injected by some plugin.
     #[serde(rename = "pluginInfo")]
-    #[serde(borrow)]
-    plugin_info: RawData<'a>,
+    plugin_info: BoxedRawData,
     /// Collection of tracks.
-    tracks: Vec<TrackData<'a>>,
+    tracks: Vec<TrackData>,
 }
 
 /// Contains the response got from loading tracks.
 #[derive(Deserialize, Debug)]
 #[serde(tag = "loadType", content = "data")]
 #[allow(dead_code)]
-pub enum LoadResult<'a> {
+pub enum LoadResult {
     /// When searching by the track identifier or its url.
     #[serde(rename = "track")]
-    #[serde(borrow)]
-    SingleTrack(TrackData<'a>),
+    SingleTrack(TrackData),
     /// When searching by the playlist identifier or its url.
     #[serde(rename = "playlist")]
-    Playlist(PlaylistData<'a>),
+    Playlist(PlaylistData),
     /// When a search engine is used (e.g., `ytsearch`, `soundcloud`).
     #[serde(rename = "search")]
-    TracksSearch(Vec<TrackData<'a>>),
+    TracksSearch(Vec<TrackData>),
     /// When there's no match for the given identifier/url.
     #[serde(rename = "empty")]
     EmptyMatch(
@@ -342,28 +340,10 @@ pub struct LowPass {
     pub smoothing: Option<f64>,
 }
 
-/// Contains a map of plugins raw configuration.
-///
-/// Configuration isn't already parsed since it depends on the plugins that you
-/// use.
-#[derive(Deserialize, Serialize, Debug)]
-#[allow(dead_code)]
-pub struct PluginFilters<'a> {
-    #[serde(borrow)]
-    filters: HashMap<&'a str, RawData<'a>>,
-}
-
-impl<'a> PluginFilters<'a> {
-    /// Returns the raw configuration data for a given plugin name, if any.
-    pub fn get(&self, name: &'a str) -> Option<&RawData<'a>> {
-        self.filters.get(name)
-    }
-}
-
 /// Represents the player filters.
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
-pub struct PlayerFilters<'a> {
+pub struct PlayerFilters {
     /// Adjusts the player volume from 0.0 to 5.0, where 1.0 is 100%.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub volume: Option<FilterVolume>,
@@ -399,16 +379,14 @@ pub struct PlayerFilters<'a> {
     pub low_pass: Option<LowPass>,
     /// Plugin filters.
     #[serde(rename = "pluginFilters")]
-    #[serde(borrow)]
-    #[serde(deserialize_with = "deserialize_plugin_filters")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub plugin_filters: Option<PluginFilters<'a>>,
+    pub plugin_filters: Option<HashMap<PluginName, BoxedRawData>>,
 }
 
 /// Contains the decoded player metadata.
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
-pub struct PlayerData<'a> {
+pub struct PlayerData {
     /// The player guild identifier.
     #[serde(rename = "guildId")]
     pub guild_id: GuildId,
@@ -423,8 +401,7 @@ pub struct PlayerData<'a> {
     /// The voice state of the player.
     pub voice: PlayerVoiceState,
     /// The filters used by the player.
-    #[serde(borrow)]
-    pub filters: PlayerFilters<'a>,
+    pub filters: PlayerFilters,
 }
 
 /// Memory stats in bytes of the node.
@@ -540,11 +517,11 @@ pub struct TrackException {
 /// Deserialize an instance of `T` from a raw value.
 ///
 /// See [`serde_json::from_str`] to know more.
-pub fn parse_arbitrary<'a, T>(
-    data: RawData<'a>
+pub fn parse_arbitrary<'de, T>(
+    data: &'de BoxedRawData
 ) -> Result<T, serde_json::Error>
 where
-    T: serde::Deserialize<'a>
+    T: serde::Deserialize<'de>
 {
     serde_json::from_str(data.get())
 }
@@ -640,54 +617,6 @@ where
     deserializer.deserialize_map(EmptyMatchVisitor)
 }
 
-fn deserialize_plugin_filters<'de, D>(
-    deserializer: D
-) -> Result<Option<PluginFilters<'de>>, D::Error>
-where
-    D: de::Deserializer<'de>,
-{
-    struct PluginFiltersVisitor;
-
-    impl<'de> de::Visitor<'de> for PluginFiltersVisitor {
-        type Value = Option<PluginFilters<'de>>;
-
-        fn expecting(
-            &self,
-            formatter: &mut std::fmt::Formatter
-        ) -> std::fmt::Result {
-            formatter.write_str(
-                "a map with configuration data for each plugin name"
-            )
-        }
-
-        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-        where
-            A: de::MapAccess<'de>,
-        {
-            let mut filters: HashMap<&'de str, RawData<'de>> = HashMap::new();
-
-            while let Some((key, value)) = map.next_entry()? {
-                filters.insert(key, value);
-            }
-
-            Ok(Some(PluginFilters { filters }))
-        }
-
-        fn visit_none<E>(self) -> Result<Self::Value, E>
-        where
-            E: de::Error,
-        {
-            Ok(None)
-        }
-    }
-
-    deserializer.deserialize_map(PluginFiltersVisitor)
-}
-
-// ############### Serialization Utils ###############
-
-// TODO: implement plugins filters serializer.
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -738,31 +667,5 @@ mod test {
             matches!(res.unwrap(), EmptyMatch(())),
             "expecting LoadResult::EmptyMatch(())"
         );
-    }
-
-    #[test]
-    fn test_plugin_filters() {
-        let raw = r#"{
-            "pluginFilters": {
-                "p1": true,
-                "p2": { "something": 1 }
-            }
-        }"#;
-
-        let res = serde_json::from_str::<PlayerFilters>(raw);
-        assert!(res.is_ok(), "got error: {:?}", res);
-
-        let plugin_filters = res.unwrap().plugin_filters;
-        assert!(plugin_filters.is_some());
-
-        let plugin_filters = plugin_filters.unwrap();
-
-        let p1 = plugin_filters.get("p1");
-        assert!(p1.is_some(), "expecting p1 entry in plugin filters map");
-        assert_eq!(p1.unwrap().get(), r#"true"#);
-
-        let p2 = plugin_filters.get("p2");
-        assert!(p2.is_some(), "expecting p2 entry in plugin filters map");
-        assert_eq!(p2.unwrap().get(), r#"{ "something": 1 }"#);
     }
 }

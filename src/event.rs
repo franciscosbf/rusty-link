@@ -14,47 +14,47 @@ pub(crate) trait Event { }
 
 /// Dispatched when a track starts playing.
 #[allow(missing_docs)]
-pub struct TrackStartEvent<'a> {
+pub struct TrackStartEvent {
     /// Player where a track starts playing.
     pub player: Player,
-    pub track: TrackData<'a>,
+    pub track: TrackData,
 }
 
-impl<'a> Event for TrackStartEvent<'a> { }
+impl Event for TrackStartEvent { }
 
 /// Dispatched when a track ends.
 #[allow(missing_docs)]
-pub struct TrackEndEvent<'a> {
+pub struct TrackEndEvent {
     /// Player where a track ended.
     pub player: Player,
-    pub track: TrackData<'a>,
+    pub track: TrackData,
     pub reason: TrackEndReason,
 }
 
-impl<'a> Event for TrackEndEvent<'a> { }
+impl Event for TrackEndEvent { }
 
 /// Dispatched when a track throws an exception.
 #[allow(missing_docs)]
-pub struct TrackExceptionEvent<'a> {
+pub struct TrackExceptionEvent {
     /// Player where a track dispatched an exception.
     pub player: Player,
-    pub track: TrackData<'a>,
+    pub track: TrackData,
     pub exception: TrackException,
 }
 
-impl<'a> Event for TrackExceptionEvent<'a> { }
+impl Event for TrackExceptionEvent { }
 
 /// Dispatched when a track gets stuck while playing.
 #[allow(missing_docs)]
-pub struct TrackStuckEvent<'a> {
+pub struct TrackStuckEvent {
     /// Player where the track got stuck.
     pub player: Player,
-    pub track: TrackData<'a>,
+    pub track: TrackData,
     /// The threshold in milliseconds that was exceeded.
     pub threshold: Milli,
 }
 
-impl<'a> Event for TrackStuckEvent<'a> { }
+impl<'a> Event for TrackStuckEvent { }
 
 /// Dispatched when the websocket connection to Discord voice servers is closed.
 pub struct WebSocketClosedEvent {
@@ -100,17 +100,17 @@ impl Event for WebSocketErrorEvent { }
 /// use futures_util::future::{BoxFuture, FutureExt};
 ///
 /// # struct BotState { }
-/// # impl<'a> BotState {
-/// #     async fn register_started_track(&self, _ :TrackStartEvent<'a>) { }
+/// # impl BotState {
+/// #     async fn register_started_track(&self, _ :TrackStartEvent) { }
 /// # }
 /// struct Handlers {
 ///     bot_state: Arc<BotState>,
 /// }
 ///
-/// impl<'a: 'static> EventHandlers<'a> for Handlers {
+/// impl EventHandlers for Handlers {
 ///     fn on_track_start(
 ///         &self,
-///         event: TrackStartEvent<'a>
+///         event: TrackStartEvent
 ///     ) -> BoxFuture<'static, ()> {
 ///         let state = self.bot_state.clone();
 ///
@@ -122,21 +122,21 @@ impl Event for WebSocketErrorEvent { }
 ///     // The same goes for the reamining handlers...
 ///     # fn on_track_end(
 ///     #     &self,
-///     #     _: TrackEndEvent<'a>
+///     #     _: TrackEndEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
 ///     # fn on_track_exception(
 ///     #     &self,
-///     #     _: TrackExceptionEvent<'a>
+///     #     _: TrackExceptionEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
 ///     # fn on_track_stuck(
 ///     #     &self,
-///     #     _: TrackStuckEvent<'a>
+///     #     _: TrackStuckEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
@@ -156,29 +156,29 @@ impl Event for WebSocketErrorEvent { }
 ///     # }
 /// }
 /// ```
-pub trait EventHandlers<'a> {
+pub trait EventHandlers {
     /// Receives the next [`TrackStartEvent`].
     fn on_track_start(
         &self,
-        event: TrackStartEvent<'a>
+        event: TrackStartEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`TrackEndEvent`].
     fn on_track_end(
         &self,
-        event: TrackEndEvent<'a>
+        event: TrackEndEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`TrackExceptionEvent`].
     fn on_track_exception(
         &self,
-        event: TrackExceptionEvent<'a>
+        event: TrackExceptionEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`TrackStuckEvent`].
     fn on_track_stuck(
         &self,
-        event: TrackStuckEvent<'a>
+        event: TrackStuckEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`WebSocketClosedEvent`].
@@ -195,13 +195,13 @@ pub trait EventHandlers<'a> {
 }
 
 /// Processes the event with the given handler in a different task.
-pub(crate) fn dispatch_event<'a, H, E>(
+pub(crate) fn dispatch_event<H, E>(
     event: E,
     dispatcher: &H,
     handler: fn(&H, E) -> BoxFuture<'static, ()>
 )
 where
-    H: EventHandlers<'a>,
+    H: EventHandlers,
     E: Event
 {
     tokio::spawn(handler(dispatcher, event));
