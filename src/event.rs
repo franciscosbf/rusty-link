@@ -57,23 +57,23 @@ pub struct TrackStuckEvent {
 impl Event for TrackStuckEvent { }
 
 /// Dispatched when the websocket connection to Discord voice servers is closed.
-pub struct WebSocketClosedEvent {
+pub struct DiscordWsClosedEvent {
     /// Node where the web socket was closed.
     pub node: Node,
 }
 
-impl Event for WebSocketClosedEvent { }
+impl Event for DiscordWsClosedEvent { }
 
 /// Special event used to report errors on receiving/parsing messages from the
 /// web socket of a node.
 #[allow(missing_docs)]
-pub struct WebSocketErrorEvent {
+pub struct WsClientErrorEvent {
     /// Node where the web socket got an error.
     pub node: Node,
     pub error: RustyError,
 }
 
-impl Event for WebSocketErrorEvent { }
+impl Event for WsClientErrorEvent { }
 
 /// Skeleton of event handlers.
 ///
@@ -141,16 +141,16 @@ impl Event for WebSocketErrorEvent { }
 ///     #     async { }.boxed()
 ///     # }
 ///     #
-///     # fn on_ws_closed(
+///     # fn on_discord_ws_closed(
 ///     #     &self,
-///     #     _: WebSocketClosedEvent
+///     #     _: DiscordWsClosedEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
-///     # fn on_ws_error(
+///     # fn on_ws_client_error(
 ///     #     &self,
-///     #     _: WebSocketErrorEvent
+///     #     _: WsClientErrorEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async {}.boxed()
 ///     # }
@@ -181,16 +181,16 @@ pub trait EventHandlers {
         event: TrackStuckEvent
     ) -> BoxFuture<'static, ()>;
 
-    /// Receives the next [`WebSocketClosedEvent`].
-    fn on_ws_closed(
+    /// Receives the next [`DiscordWsClosedEvent`].
+    fn on_discord_ws_closed(
         &self,
-        event: WebSocketClosedEvent
+        event: DiscordWsClosedEvent
     ) -> BoxFuture<'static, ()>;
 
-    /// Receives the next [`WebSocketErrorEvent`].
-    fn on_ws_error(
+    /// Receives the next [`WsClientErrorEvent`].
+    fn on_ws_client_error(
         &self,
-        event: WebSocketErrorEvent
+        event: WsClientErrorEvent
     ) -> BoxFuture<'static, ()>;
 }
 
