@@ -5,15 +5,18 @@
 use std::sync::Arc;
 
 use hashbrown::HashMap;
+use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 use tokio::sync::{oneshot, RwLock};
 use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite::{self, protocol::Message};
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::RustyError;
 use crate::model::{NodeStats, ApiError};
+use crate::op::{ReadyOp, OpType};
 use crate::player::Player;
 use crate::utils::InnerArc;
 
@@ -63,43 +66,27 @@ impl NodeInfo {
     }
 }
 
-struct WebSocket {
-    last_session_id: Option<String>,
-    shutdown: Option<oneshot::Sender<()>>,
-    handler: Option<JoinHandle<Result<(), tungstenite::Error>>>,
+struct WebSocketReader {
+    stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
 
-impl WebSocket {
-    async fn process_message(
-        result: Result<Message, tungstenite::Error>
-    ) -> Result<Option<serde_json::Value>, RustyError> {
-        // Fetch message.
-        let message: Message = match result {
-            Ok(msg) => msg,
-            Err(e) => {
-                return Err(RustyError::WebSocketError(e));
-            }
+impl WebSocketReader {
+    /// Returns the next text message content if any.
+    async fn process_next(&mut self) -> Result<Option<String>, RustyError> {
+        let item = match self.stream.next().await {
+            Some(item) => item,
+            None => return Ok(None),
         };
-        // Parse contents.
-        match message {
-            Message::Text(data) => {
-                match serde_json::from_str(data.as_str()) {
-                    Ok(content) => {
-                        if !matches!(content, serde_json::Value::Object(_)) {
-                            return Err(
-                                RustyError::ParseError(
-                                    "expecting json object".to_string()
-                                )
-                            );
-                        }
 
-                        Ok(Some(content))
-                    },
-                    Err(e) => Err(RustyError::ParseError(e.to_string()))
-                }
-            }
+        let message = match item {
+            Ok(message) => message,
+            Err(e) => return Err(RustyError::WebSocketError(e)),
+        };
+
+        match message {
+            Message::Text(data) => Ok(Some(data)),
             Message::Close(_) => Err(RustyError::ImmediateWebSocketClose),
-            _ => Ok(None),
+            _ => Ok(None), // Ignore other types of message.
         }
     }
 }
@@ -139,12 +126,33 @@ struct NodeState {
     stats: RwLock<InternalStats>,
 }
 
+/// Gives node access to close web socket.
+struct WebSocketAlert {
+    shutdown: oneshot::Sender<()>,
+    handler: JoinHandle<Result<(), RustyError>>,
+}
+
+impl WebSocketAlert {
+    async fn close(self) -> Result<(), RustyError> {
+        // Orders to shutdown, despite of if the handler has already terminated
+        // or not.
+        let _ = self.shutdown.send(());
+
+        // Catch the returned value.
+        match self.handler.await {
+            Ok(result) => result,
+            Err(_) => Ok(()), // WARN: Shadows JoinError... should I handle it???
+        }
+    }
+}
+
 /// TODO:
 pub struct NodeRef {
     config: NodeConfig,
-    client: reqwest::Client,
-    ws: WebSocket,
     state: Arc<NodeState>,
+    client: reqwest::Client,
+    last_session_id: Option<String>,
+    ws_alert: Option<WebSocketAlert>,
 }
 
 impl NodeRef {
@@ -162,22 +170,15 @@ impl NodeRef {
             .build()
             .expect(""); // TODO: write this msg.
 
-        // Finalize web socket state creation.
-        let ws = WebSocket {
-            last_session_id: None,
-
-            // This fields are set by start_ws method.
-            shutdown: None,
-            handler: None
-        };
-
         // Initialize internal state shared with the socket.
         let state = Arc::new(NodeState {
             players: RwLock::new(HashMap::new()),
             stats: RwLock::new(InternalStats::new())
         });
 
-        Self { config, client, ws, state }
+        Self {
+            config, state, client, last_session_id: None, ws_alert: None,
+        }
     }
 
     /// TODO:
@@ -222,9 +223,8 @@ impl NodeRef {
 
         // Build request based on last session id (if any) and if we want to
         // resume the current local state.
-        let last_session_id = &mut self.ws.last_session_id;
-        let keep_session = self.config.keep_session;
-        if last_session_id.is_some() && keep_session {
+        let last_session_id = &mut self.last_session_id;
+        if last_session_id.is_some() && self.config.keep_session {
             let session_id = last_session_id
                 .as_ref() // Get session as reference since it may be restored.
                 .unwrap();
@@ -237,118 +237,100 @@ impl NodeRef {
 
         // Try to stablish a connection.
         let res = tokio_tungstenite::connect_async(request).await;
-        let (mut stream, response) = match res {
+        // Response is ignored since we will verify if session was restored
+        // after receiving the first operation (aka ready op).
+        let (stream, _) = match res {
             Ok(content) => content,
             Err(e) => {
                 return Err(RustyError::WebSocketError(e));
             }
         };
 
-        // Wait until the first item is received (client is expecting ready op).
-        let item = stream.next().await;
-        let result = match item {
-            Some(res) => res,
-            None => {
-                let _ = stream.close(None).await;
-                return Err(RustyError::MissingReadyMessage);
-            }
+        let mut ws_reader = WebSocketReader { stream };
+
+        // Awaits for ready operation and tries to parse it.
+        let raw = match ws_reader.process_next().await? {
+            Some(raw) => raw,
+            None => return Err(RustyError::MissingReadyMessage),
+        };
+        let ready_op = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
+            Ok(ready_op) => ready_op,
+            Err(e) =>
+                return Err(
+                    RustyError::ParseError(
+                        format!("invalid ready operation message: {e}")
+                    )
+                ),
         };
 
-        // Parse the raw value to be checked right after.
-        let resumed_session = match WebSocket::process_message(result).await? {
-            Some(raw) => {
-                // TODO: serde parse with ReadyOp.
-                let op = raw
-                    .get("op")
-                    .unwrap()
-                    .as_str()
-                    .unwrap();
-                if op != "ready" {
-                    return Err(RustyError::MissingReadyMessage);
-                }
+        // Update session id.
+        *last_session_id = Some(ready_op.session_id);
 
-                // Check if node state was restored despite of sending or not
-                // the previous session identifier.
-                let resumed = response
-                    .headers()
-                    .get("Session-Id")
-                    .map(|raw| Some(matches!(raw.as_bytes(), b"true")))
-                    .is_some();
-
-                // Fetch session id if not restored.
-                if !resumed {
-                    let new_session_id = raw
-                        .get("sessionId")
-                        .unwrap()
-                        .as_str()
-                        .unwrap()
-                        .to_string();
-                    *last_session_id = Some(new_session_id);
-                }
-
-                resumed
-            },
-            None => {
-                return Err(RustyError::MissingReadyMessage);
-            }
-        };
-        // TODO: parse event.
-
+        // Prepare data structs to be moved to web socket receiver loop.
         let state = self.state.clone();
-        let (shutdown, mut rx) = oneshot::channel();
+        let (tx, mut rx) = oneshot::channel();
 
-        // Launch web socket reader.
+        // Spawn web socket receiver loop.
         let handler = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = &mut rx => { // Got requested to close the connection.
-                        return stream.close(None).await;
-                    }
-                    item = stream.next() => { // Process next item if any.
-                        if item.is_none() { // We done were.
-                            return Ok(());
-                        }
-
-                        let res = item.unwrap();
-                        match res {
-                            Ok(message) => {
-                                // TODO: process message.
-                                let _ = message;
-                                let _ = state.players;
-                                let _ = state.stats;
-                            },
-                            Err(e) => { // Something went wrong.
+                    _ = &mut rx => // Got notified to close the connection.
+                        return match ws_reader.stream.close(None).await {
+                            Ok(_) => break,
+                            Err(e) => Err(RustyError::WebSocketError(e)),
+                        },
+                    result = ws_reader.process_next() => {
+                        let raw = match result {
+                            Ok(Some(contained_raw)) => contained_raw,
+                            Ok(None) => // Terminates execution.
+                                return Ok(()),
+                            Err(e) => {
+                                // TODO: dispatch event with error.
                                 let _ = e;
-                                // Dispatch an event about this.
-                                // TODO: notify error.
-                            }
-                        }
+                                break
+                            },
+                        };
+
+                        // Tries to parse the operation.
+                        let raw_str = raw.as_str();
+                        let op = match serde_json::from_str::<OpType>(raw_str) {
+                            Ok(op) => op,
+                            Err(e) => {
+                                // TODO: dispatch event with error.
+                                let _ = e;
+                                continue
+                            },
+                        };
+
+                        // TODO: interpret operation.
+                        let _ = op;
+                        let _ = state;
                     }
                 };
             }
+            Ok(())
         });
 
-        // Set close channel to finalize web socket reader.
-        self.ws.shutdown = Some(shutdown);
-        self.ws.handler = Some(handler);
+        // Set web socket alerter so it can be explicitly closed later.
+        let ws_notify = WebSocketAlert { shutdown: tx, handler };
+        self.ws_alert = Some(ws_notify);
 
-        Ok(resumed_session)
+        Ok(ready_op.resumed)
     }
 
-    // WARN: this function must be called only one time at node removal.
-    async fn shutdown_ws(&mut self) -> Result<(), tungstenite::Error> {
-        // Order shutdown.
-        let _ = self.ws.shutdown
-            .take()
-            .unwrap()
-            .send(());
+    /// If open, closes the web socket connection.
+    ///
+    /// Returns Ok if connection isn't open or the clone operation succeeded.
+    pub async fn close(&mut self) -> Result<(), RustyError> {
+        if self.ws_alert.is_some() {
+            return self.ws_alert
+                .take()
+                .unwrap()
+                .close()
+                .await;
+        }
 
-        // Wait until it closes.
-        self.ws.handler
-            .take()
-            .unwrap()
-            .await
-            .unwrap_or(Ok(())) // Shadows JoinError... should I handle it???
+        Ok(())
     }
 }
 
