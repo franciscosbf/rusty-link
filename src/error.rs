@@ -41,6 +41,8 @@ pub enum RustyError {
     UnexpectedMessage,
 }
 
+pub use self::RustyError::*;
+
 impl Display for RustyError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
