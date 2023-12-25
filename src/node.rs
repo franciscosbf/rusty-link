@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
-use tokio::sync::{oneshot, RwLock};
+use tokio::sync::{oneshot, RwLock, Mutex};
 use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
@@ -128,7 +128,8 @@ struct NodeState {
 
 /// Gives node access to close web socket.
 struct WebSocketAlert {
-    shutdown: oneshot::Sender<()>,
+    last_session_id: String,
+    tx: oneshot::Sender<()>,
     handler: JoinHandle<Result<(), RustyError>>,
 }
 
@@ -136,7 +137,7 @@ impl WebSocketAlert {
     async fn close(self) -> Result<(), RustyError> {
         // Orders to shutdown, despite of if the handler has already terminated
         // or not.
-        let _ = self.shutdown.send(());
+        let _ = self.tx.send(());
 
         // Catch the returned value.
         match self.handler.await {
@@ -151,8 +152,7 @@ pub struct NodeRef {
     config: NodeConfig,
     state: Arc<NodeState>,
     client: reqwest::Client,
-    last_session_id: Option<String>,
-    ws_alert: Option<WebSocketAlert>,
+    ws_alerter: Mutex<Option<WebSocketAlert>>,
 }
 
 impl NodeRef {
@@ -177,7 +177,7 @@ impl NodeRef {
         });
 
         Self {
-            config, state, client, last_session_id: None, ws_alert: None,
+            config, state, client, ws_alerter: Mutex::new(None),
         }
     }
 
@@ -213,7 +213,9 @@ impl NodeRef {
     }
 
     /// TODO:
-    pub async fn connect(&mut self) -> Result<bool, RustyError> {
+    pub async fn connect(&self) -> Result<bool, RustyError> {
+        let mut ws_alerter = self.ws_alerter.lock().await;
+
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
@@ -223,11 +225,12 @@ impl NodeRef {
 
         // Build request based on last session id (if any) and if we want to
         // resume the current local state.
-        let last_session_id = &mut self.last_session_id;
-        if last_session_id.is_some() && self.config.keep_session {
-            let session_id = last_session_id
-                .as_ref() // Get session as reference since it may be restored.
-                .unwrap();
+        if ws_alerter.is_some() && self.config.keep_session {
+            let session_id = ws_alerter
+                .as_ref()
+                .unwrap()
+                .last_session_id
+                .as_str();
             request_builder = request_builder
                 .header("Session-Id", session_id);
         }
@@ -262,9 +265,6 @@ impl NodeRef {
                     )
                 ),
         };
-
-        // Update session id.
-        *last_session_id = Some(ready_op.session_id);
 
         // Prepare data structs to be moved to web socket receiver loop.
         let state = self.state.clone();
@@ -312,8 +312,10 @@ impl NodeRef {
         });
 
         // Set web socket alerter so it can be explicitly closed later.
-        let ws_notify = WebSocketAlert { shutdown: tx, handler };
-        self.ws_alert = Some(ws_notify);
+        let ws_notify = WebSocketAlert {
+            last_session_id: ready_op.session_id, tx, handler
+        };
+        *ws_alerter = Some(ws_notify);
 
         Ok(ready_op.resumed)
     }
@@ -321,16 +323,18 @@ impl NodeRef {
     /// If open, closes the web socket connection.
     ///
     /// Returns Ok if connection isn't open or the clone operation succeeded.
-    pub async fn close(&mut self) -> Result<(), RustyError> {
-        if self.ws_alert.is_some() {
-            return self.ws_alert
-                .take()
-                .unwrap()
-                .close()
-                .await;
+    pub async fn close(&self) -> Result<(), RustyError> {
+        let mut ws_alerter = self.ws_alerter.lock().await;
+
+        if ws_alerter.is_none() {
+            return Ok(());
         }
 
-        Ok(())
+        ws_alerter
+            .take()
+            .unwrap()
+            .close()
+            .await
     }
 }
 
