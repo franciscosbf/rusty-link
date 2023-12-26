@@ -20,7 +20,7 @@ use crate::model::{
 pub struct TrackStartEvent {
     /// Player where a track starts playing.
     pub player: Player,
-    pub track: TrackData,
+    pub track: Box<TrackData>,
 }
 
 /// Dispatched when a track ends.
@@ -28,7 +28,7 @@ pub struct TrackStartEvent {
 pub struct TrackEndEvent {
     /// Player where a track ended.
     pub player: Player,
-    pub track: TrackData,
+    pub track: Box<TrackData>,
     pub reason: TrackEndReason,
 }
 
@@ -37,7 +37,7 @@ pub struct TrackEndEvent {
 pub struct TrackExceptionEvent {
     /// Player where a track dispatched an exception.
     pub player: Player,
-    pub track: TrackData,
+    pub track: Box<TrackData>,
     pub exception: TrackException,
 }
 
@@ -46,7 +46,7 @@ pub struct TrackExceptionEvent {
 pub struct TrackStuckEvent {
     /// Player where the track got stuck.
     pub player: Player,
-    pub track: TrackData,
+    pub track: Box<TrackData>,
     /// The threshold in milliseconds that was exceeded.
     pub threshold: Milli,
 }
@@ -65,7 +65,7 @@ pub struct DiscordWsClosedEvent<H: EventHandlers> {
 pub struct WsClientErrorEvent<H: EventHandlers> {
     /// Node where the web socket got an error.
     pub node: Node<H>,
-    pub error: RustyError,
+    pub error: Box<RustyError>,
 }
 
 /// Skeleton of event handlers.

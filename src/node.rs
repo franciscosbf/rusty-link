@@ -15,9 +15,9 @@ use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::RustyError;
-use crate::event::{EventHandlers, WsClientErrorEvent};
+use crate::event::{EventHandlers, WsClientErrorEvent, DiscordWsClosedEvent};
 use crate::model::{NodeStats, ApiError};
-use crate::op::{ReadyOp, OpType};
+use crate::op::{ReadyOp, OpType, EventType};
 use crate::player::Player;
 use crate::utils::InnerArc;
 
@@ -88,6 +88,13 @@ impl WebSocketReader {
             Message::Text(data) => Ok(Some(data)),
             Message::Close(_) => Err(RustyError::ImmediateWebSocketClose),
             _ => Ok(None), // Ignore other types of message.
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), RustyError> {
+        match self.stream.close(None).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(RustyError::WebSocketError(e)),
         }
     }
 }
@@ -224,6 +231,10 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
     pub async fn connect(&self) -> Result<bool, RustyError> {
         let mut ws_alerter = self.ws_alerter.lock().await;
 
+        if ws_alerter.is_some() {
+            return Ok(false); // Doesn't make sense trying to connect again.
+        }
+
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
@@ -285,45 +296,101 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
             loop {
                 tokio::select! {
                     _ = &mut rx => // Got notified to close the connection.
-                        return match ws_reader.stream.close(None).await {
-                            Ok(_) => break,
-                            Err(e) => Err(RustyError::WebSocketError(e)),
-                        },
+                        return ws_reader
+                            .close()
+                            .await,
                     result = ws_reader.process_next() => {
                         let raw = match result {
                             Ok(Some(contained_raw)) => contained_raw,
                             Ok(None) => // Terminates execution.
                                 return Ok(()),
                             Err(e) => {
-                                let cnode = node.clone();
                                 let chandlers = handlers.clone();
+                                let event = WsClientErrorEvent {
+                                    node: node.clone(),
+                                    error: Box::new(e),
+                                };
                                 tokio::spawn(async move {
-                                    let event = WsClientErrorEvent {
-                                        node: cnode,
-                                        error: e,
-                                    };
                                     chandlers
                                         .on_ws_client_error(event)
                                         .await;
                                 });
-                                break
+                                break // This kind of error cannot be tolerated.
                             },
                         };
 
                         // Tries to parse the operation.
                         let raw_str = raw.as_str();
-                        let op = match serde_json::from_str::<OpType>(raw_str) {
-                            Ok(op) => op,
+                        let result = serde_json::from_str::<OpType>(raw_str);
+                        let op_type = match result {
+                            Ok(op_type) => op_type,
                             Err(e) => {
-                                // TODO: dispatch event with error.
-                                let _ = e;
+                                let chandlers = handlers.clone();
+                                let event = WsClientErrorEvent {
+                                    node: node.clone(),
+                                    error: Box::new(RustyError::ParseError(
+                                        format!("on parse operation: {e}")
+                                    )),
+                                };
+                                tokio::spawn(async move {
+                                    chandlers
+                                        .on_ws_client_error(event)
+                                        .await;
+                                });
                                 continue
                             },
                         };
 
-                        // TODO: interpret operation.
-                        let _ = op;
-                        let _ = state;
+                        // Process operation.
+                        match op_type {
+                            OpType::PlayerUpdate(op) => {
+                                // TODO:
+                                let _ = op;
+                            }
+                            OpType::Stats(op) => {
+                                state.stats
+                                    .write()
+                                    .await
+                                    .maybe_update(&op.stats);
+                            }
+                            OpType::Event(op) => {
+                                let chandlers = handlers.clone();
+                                let cnode = node.clone();
+
+                                match op.event {
+                                    EventType::TrackStart(_) => {
+                                        // TODO:
+                                    }
+                                    EventType::TrackEnd(_) => {
+                                        // TODO:
+                                    }
+                                    EventType::TrackException(_) => {
+                                        // TODO:
+                                    }
+                                    EventType::TrackStuck(_) => {
+                                        // TODO:
+                                    }
+                                    EventType::WebSocketClosed(description) => {
+                                        let event = DiscordWsClosedEvent {
+                                            node: cnode,
+                                            description,
+                                        };
+                                        tokio::spawn(async move {
+                                            chandlers
+                                                .on_discord_ws_closed(event)
+                                                .await;
+                                        });
+
+                                        // We can't do anything about that.
+                                        return ws_reader
+                                            .close()
+                                            .await;
+                                    }
+                                }
+                                let _ = op;
+                            }
+                            _ => () // ready op was already processed
+                        }
                     }
                 };
             }
@@ -347,7 +414,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         let mut ws_alerter = self.ws_alerter.lock().await;
 
         if ws_alerter.is_none() {
-            return Ok(());
+            return Ok(()); // There's no connection with the node.
         }
 
         ws_alerter
@@ -365,7 +432,7 @@ pub struct Node<H: EventHandlers> {
 }
 
 impl<H: EventHandlers + Clone> Node<H> {
-    fn new(config: NodeConfig<H>) -> Self {
+        fn new(config: NodeConfig<H>) -> Self {
         let mut node = Self {
             inner: Arc::new(NodeRef::new(config))
         };

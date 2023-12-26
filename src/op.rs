@@ -37,24 +37,24 @@ pub(crate) struct StatsOp {
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct TrackStartEventData {
-    pub(crate) track: TrackData,
+    pub(crate) track: Box<TrackData>,
 }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct TrackEndEventData {
-    pub(crate) track: TrackData,
+    pub(crate) track: Box<TrackData>,
     pub(crate) reason: TrackEndReason,
 }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct TrackExceptionEventData {
-    pub(crate) track: TrackData,
+    pub(crate) track: Box<TrackData>,
     pub(crate) exception: TrackException,
 }
 
 #[derive(Deserialize, Debug)]
 pub(crate) struct TrackStuckEventData {
-    pub(crate) track: TrackData,
+    pub(crate) track: Box<TrackData>,
     #[serde(rename = "thresholdMs")]
     pub(crate) threshold: Milli,
 }
@@ -63,13 +63,13 @@ pub(crate) struct TrackStuckEventData {
 #[serde(tag = "type")]
 pub(crate) enum EventType {
     #[serde(rename = "TrackStartEvent")]
-    TrackStart(Box<TrackStartEventData>),
+    TrackStart(TrackStartEventData),
     #[serde(rename = "TrackEndEvent")]
-    TrackEnd(Box<TrackEndEventData>),
+    TrackEnd(TrackEndEventData),
     #[serde(rename = "TrackExceptionEvent")]
-    TrackException(Box<TrackExceptionEventData>),
+    TrackException(TrackExceptionEventData),
     #[serde(rename = "TrackStuckEvent")]
-    TrackStuck(Box<TrackStuckEventData>),
+    TrackStuck(TrackStuckEventData),
     #[serde(rename = "WebSocketClosedEvent")]
     WebSocketClosed(DiscordAudioWsClosed),
 }
