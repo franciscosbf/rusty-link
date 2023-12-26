@@ -15,6 +15,7 @@ use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::RustyError;
+use crate::event::{EventHandlers, WsClientErrorEvent};
 use crate::model::{NodeStats, ApiError};
 use crate::op::{ReadyOp, OpType};
 use crate::player::Player;
@@ -113,12 +114,13 @@ impl InternalStats {
     }
 }
 
-struct NodeConfig {
+struct NodeConfig<H: EventHandlers> {
     bot_user_id: BotId,
     password: String,
     keep_session: bool,
     ws_url: Url,
     rest_url: Url,
+    handlers: Arc<H>,
 }
 
 struct NodeState {
@@ -148,15 +150,16 @@ impl WebSocketAlert {
 }
 
 /// TODO:
-pub struct NodeRef {
-    config: NodeConfig,
+pub struct NodeRef<H: EventHandlers> {
+    node: Option<Node<H>>,
+    config: NodeConfig<H>,
     state: Arc<NodeState>,
     client: reqwest::Client,
     ws_alerter: Mutex<Option<WebSocketAlert>>,
 }
 
-impl NodeRef {
-    fn new(config: NodeConfig) -> Self {
+impl<H: EventHandlers + Clone> NodeRef<H> {
+    fn new(config: NodeConfig<H>) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
         rest_headers.insert(
@@ -177,8 +180,13 @@ impl NodeRef {
         });
 
         Self {
-            config, state, client, ws_alerter: Mutex::new(None),
+            node: None, config, state, client,
+            ws_alerter: Mutex::new(None),
         }
+    }
+
+    fn set_wrapper(&mut self, node: Node<H>) {
+        self.node.replace(node);
     }
 
     /// TODO:
@@ -267,6 +275,8 @@ impl NodeRef {
         };
 
         // Prepare data structs to be moved to web socket receiver loop.
+        let node = self.node.as_ref().unwrap().clone();
+        let handlers = self.config.handlers.clone();
         let state = self.state.clone();
         let (tx, mut rx) = oneshot::channel();
 
@@ -285,8 +295,17 @@ impl NodeRef {
                             Ok(None) => // Terminates execution.
                                 return Ok(()),
                             Err(e) => {
-                                // TODO: dispatch event with error.
-                                let _ = e;
+                                let cnode = node.clone();
+                                let chandlers = handlers.clone();
+                                tokio::spawn(async move {
+                                    let event = WsClientErrorEvent {
+                                        node: cnode,
+                                        error: e,
+                                    };
+                                    chandlers
+                                        .on_ws_client_error(event)
+                                        .await;
+                                });
                                 break
                             },
                         };
@@ -308,6 +327,7 @@ impl NodeRef {
                     }
                 };
             }
+
             Ok(())
         });
 
@@ -340,12 +360,28 @@ impl NodeRef {
 
 /// TODO:
 #[derive(Clone)]
-pub struct Node {
-    inner: Arc<NodeRef>,
+pub struct Node<H: EventHandlers> {
+    inner: Arc<NodeRef<H>>,
 }
 
-impl InnerArc for Node {
-    type Ref = NodeRef;
+impl<H: EventHandlers + Clone> Node<H> {
+    fn new(config: NodeConfig<H>) -> Self {
+        let mut node = Self {
+            inner: Arc::new(NodeRef::new(config))
+        };
+
+        // Stores a cloned reference of node in the inner instance.
+        let cloned_node = node.clone();
+        Arc::get_mut(&mut node.inner)
+            .unwrap()
+            .set_wrapper(cloned_node);
+
+        node
+    }
+}
+
+impl<H: EventHandlers> InnerArc for Node<H> {
+    type Ref = NodeRef<H>;
 
     fn instance(&self) -> &Arc<Self::Ref> {
         &self.inner
@@ -353,22 +389,24 @@ impl InnerArc for Node {
 }
 
 /// Keeps track of all registered nodes.
-pub struct NodeManagerRef {
+pub struct NodeManagerRef<H: EventHandlers> {
     bot_user_id: BotId,
-    nodes: RwLock<HashMap<NodeName, Node>>,
+    handlers: Arc<H>,
+    nodes: RwLock<HashMap<NodeName, Node<H>>>,
     players: RwLock<HashMap<GuildId, Player>>,
 }
 
-impl NodeManagerRef {
-    fn new(bot_user_id: BotId) -> Self {
+impl<H: EventHandlers> NodeManagerRef<H> {
+    fn new(bot_user_id: BotId, handlers: H) -> Self {
         Self {
             bot_user_id,
+            handlers: Arc::new(handlers),
             nodes: RwLock::new(HashMap::new()),
             players: RwLock::new(HashMap::new()),
         }
     }
 
-    async fn select_node(&self) -> Result<Node, RustyError> {
+    async fn select_node(&self) -> Result<Node<H>, RustyError> {
         todo!()
     }
 
@@ -388,7 +426,7 @@ impl NodeManagerRef {
     pub async fn get_node(
         &self,
         name: NodeName,
-    ) -> Result<Node, RustyError> {
+    ) -> Result<Node<H>, RustyError> {
         todo!()
     }
 
@@ -424,19 +462,21 @@ impl NodeManagerRef {
 ///
 /// This way, you don't need wrap with [`Arc`].
 #[derive(Clone)]
-pub struct NodeManager {
-    inner: Arc<NodeManagerRef>,
+pub struct NodeManager<H: EventHandlers> {
+    inner: Arc<NodeManagerRef<H>>,
 }
 
-impl NodeManager {
+impl<H: EventHandlers> NodeManager<H> {
     /// Creates a NodeManager instance.
-    pub fn new(bot_user_id: BotId) -> Self {
-        Self { inner: Arc::new(NodeManagerRef::new(bot_user_id)) }
+    pub fn new(bot_user_id: BotId, handlers: H) -> Self {
+        let node_manager = NodeManagerRef::new(bot_user_id, handlers);
+
+        Self { inner: Arc::new(node_manager) }
     }
 }
 
-impl InnerArc for NodeManager {
-    type Ref = NodeManagerRef;
+impl<H: EventHandlers> InnerArc for NodeManager<H> {
+    type Ref = NodeManagerRef<H>;
 
     fn instance(&self) -> &Arc<Self::Ref> {
         &self.inner

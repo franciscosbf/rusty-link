@@ -7,10 +7,13 @@ use futures_util::future::BoxFuture;
 use crate::node::Node;
 use crate::error::RustyError;
 use crate::player::Player;
-use crate::model::{TrackData, TrackEndReason, Milli, TrackException, DiscordAudioWsClosed};
-
-/// Event tag.
-pub(crate) trait Event { }
+use crate::model::{
+    TrackData,
+    TrackEndReason,
+    Milli,
+    TrackException,
+    DiscordAudioWsClosed
+};
 
 /// Dispatched when a track starts playing.
 #[allow(missing_docs)]
@@ -19,8 +22,6 @@ pub struct TrackStartEvent {
     pub player: Player,
     pub track: TrackData,
 }
-
-impl Event for TrackStartEvent { }
 
 /// Dispatched when a track ends.
 #[allow(missing_docs)]
@@ -31,8 +32,6 @@ pub struct TrackEndEvent {
     pub reason: TrackEndReason,
 }
 
-impl Event for TrackEndEvent { }
-
 /// Dispatched when a track throws an exception.
 #[allow(missing_docs)]
 pub struct TrackExceptionEvent {
@@ -41,8 +40,6 @@ pub struct TrackExceptionEvent {
     pub track: TrackData,
     pub exception: TrackException,
 }
-
-impl Event for TrackExceptionEvent { }
 
 /// Dispatched when a track gets stuck while playing.
 #[allow(missing_docs)]
@@ -54,28 +51,22 @@ pub struct TrackStuckEvent {
     pub threshold: Milli,
 }
 
-impl Event for TrackStuckEvent { }
-
 /// Dispatched when the websocket audio connection to Discord is closed.
-pub struct DiscordWsClosedEvent {
+pub struct DiscordWsClosedEvent<H: EventHandlers> {
     /// Node where the web socket was closed.
-    pub node: Node,
+    pub node: Node<H>,
     /// Explanation on why the audio web socket was closed.
     pub description: DiscordAudioWsClosed,
 }
 
-impl Event for DiscordWsClosedEvent { }
-
 /// Special event used to report errors on receiving/parsing messages from the
 /// web socket of a node.
 #[allow(missing_docs)]
-pub struct WsClientErrorEvent {
+pub struct WsClientErrorEvent<H: EventHandlers> {
     /// Node where the web socket got an error.
-    pub node: Node,
+    pub node: Node<H>,
     pub error: RustyError,
 }
-
-impl Event for WsClientErrorEvent { }
 
 /// Skeleton of event handlers.
 ///
@@ -143,22 +134,22 @@ impl Event for WsClientErrorEvent { }
 ///     #     async { }.boxed()
 ///     # }
 ///     #
-///     # fn on_discord_ws_closed(
+///     # fn on_discord_ws_closed<H: EventHandlers>(
 ///     #     &self,
-///     #     _: DiscordWsClosedEvent
+///     #     _: DiscordWsClosedEvent<H>
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
-///     # fn on_ws_client_error(
+///     # fn on_ws_client_error<H: EventHandlers>(
 ///     #     &self,
-///     #     _: WsClientErrorEvent
+///     #     _: WsClientErrorEvent<H>
 ///     # ) -> BoxFuture<'static, ()> {
-///     #     async {}.boxed()
+///     #     async { }.boxed()
 ///     # }
 /// }
 /// ```
-pub trait EventHandlers {
+pub trait EventHandlers: Send + Sync + 'static {
     /// Receives the next [`TrackStartEvent`].
     fn on_track_start(
         &self,
@@ -184,27 +175,14 @@ pub trait EventHandlers {
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`DiscordWsClosedEvent`].
-    fn on_discord_ws_closed(
+    fn on_discord_ws_closed<H: EventHandlers>(
         &self,
-        event: DiscordWsClosedEvent
+        event: DiscordWsClosedEvent<H>
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`WsClientErrorEvent`].
-    fn on_ws_client_error(
+    fn on_ws_client_error<H: EventHandlers>(
         &self,
-        event: WsClientErrorEvent
+        event: WsClientErrorEvent<H>
     ) -> BoxFuture<'static, ()>;
-}
-
-/// Processes the event with the given handler in a different task.
-pub(crate) fn dispatch_event<H, E>(
-    event: E,
-    dispatcher: &H,
-    handler: fn(&H, E) -> BoxFuture<'static, ()>
-)
-where
-    H: EventHandlers,
-    E: Event
-{
-    tokio::spawn(handler(dispatcher, event));
 }
