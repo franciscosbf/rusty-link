@@ -4,7 +4,7 @@ use std::sync::Arc;
 ///
 /// Internally, there's a reference that points to the internal implementation,
 /// protected by [`Arc`].
-pub trait InnerArc: Clone {
+pub trait InnerArc {
     /// Ref that points to the actual instance.
     type Ref;
 
