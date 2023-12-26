@@ -55,6 +55,8 @@ pub struct TrackStuckEvent {
 pub struct DiscordWsClosedEvent<H: EventHandlers> {
     /// Node where the web socket was closed.
     pub node: Node<H>,
+    /// The player associated to the closed connection.
+    pub player: Player,
     /// Explanation on why the audio web socket was closed.
     pub description: DiscordAudioWsClosed,
 }

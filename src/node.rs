@@ -15,7 +15,15 @@ use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::RustyError;
-use crate::event::{EventHandlers, WsClientErrorEvent, DiscordWsClosedEvent};
+use crate::event::{
+    EventHandlers,
+    WsClientErrorEvent,
+    DiscordWsClosedEvent,
+    TrackStartEvent,
+    TrackEndEvent,
+    TrackExceptionEvent,
+    TrackStuckEvent
+};
 use crate::model::{NodeStats, ApiError};
 use crate::op::{ReadyOp, OpType, EventType};
 use crate::player::Player;
@@ -30,9 +38,9 @@ type NodeName = String;
 
 const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 
-/// Connection info used at node registration.
+/// Connection config used at node registration.
 #[allow(missing_docs)]
-pub struct NodeInfo {
+pub struct NodeConfig {
     /// Unique identifier used internally to query the node (it's what you
     /// want).
     pub name: NodeName,
@@ -44,7 +52,7 @@ pub struct NodeInfo {
     pub password: String,
 }
 
-impl NodeInfo {
+impl NodeConfig {
     fn parse_url(
         &self,
         base: &str,
@@ -121,7 +129,8 @@ impl InternalStats {
     }
 }
 
-struct NodeConfig<H: EventHandlers> {
+/// General data that can be accessed by all node operations.
+struct NodeInfo<H: EventHandlers> {
     bot_user_id: BotId,
     password: String,
     keep_session: bool,
@@ -132,7 +141,37 @@ struct NodeConfig<H: EventHandlers> {
 
 struct NodeState {
     players: RwLock<HashMap<GuildId, Player>>,
-    stats: RwLock<InternalStats>,
+    stats: RwLock<Option<NodeStats>>,
+}
+
+impl NodeState {
+    /// Reset current stats if any.
+    async fn clear_stats(&self) {
+        self.stats
+            .write()
+            .await
+            .take();
+    }
+
+    /// Return last stats update registered.
+    async fn last_stats(&self) -> Option<NodeStats> {
+        self.stats
+            .read()
+            .await
+            .as_ref()
+            .cloned()
+    }
+
+    /// Update stats if the uptime of `new` is greater than the current one.
+    async fn maybe_update_stats(&self, new: &NodeStats) {
+        let mut stats = self.stats
+            .write()
+            .await;
+
+        if stats.is_none() || stats.as_ref().unwrap().uptime < new.uptime {
+            stats.replace(*new);
+        }
+    }
 }
 
 /// Gives node access to close web socket.
@@ -143,6 +182,7 @@ struct WebSocketAlert {
 }
 
 impl WebSocketAlert {
+    // Notifies web socket reader to close and awaits for its result.
     async fn close(self) -> Result<(), RustyError> {
         // Orders to shutdown, despite of if the handler has already terminated
         // or not.
@@ -159,14 +199,56 @@ impl WebSocketAlert {
 /// TODO:
 pub struct NodeRef<H: EventHandlers> {
     node: Option<Node<H>>,
-    config: NodeConfig<H>,
+    config: NodeInfo<H>,
     state: Arc<NodeState>,
     client: reqwest::Client,
     ws_alerter: Mutex<Option<WebSocketAlert>>,
 }
 
+/// Dispatches an event and awaits for its execution.
+async fn process_event<H: EventHandlers>(
+    event_type: EventType,
+    handlers: Arc<H>,
+    node: Node<H>,
+    player: Player,
+) {
+    match event_type {
+        EventType::TrackStart(event) => {
+            handlers.on_track_start(TrackStartEvent {
+                player, track: event.track,
+            }).await
+        }
+        EventType::TrackEnd(event) => {
+            handlers.on_track_end(TrackEndEvent {
+                player,
+                track: event.track,
+                reason: event.reason
+            }).await
+        }
+        EventType::TrackException(event) => {
+            handlers.on_track_exception(TrackExceptionEvent {
+                player,
+                track: event.track,
+                exception: event.exception
+            }).await
+        }
+        EventType::TrackStuck(event) => {
+            handlers.on_track_stuck(TrackStuckEvent {
+                player,
+                track: event.track,
+                threshold: event.threshold
+            }).await
+        }
+        EventType::WebSocketClosed(description) => {
+            handlers.on_discord_ws_closed(DiscordWsClosedEvent {
+                node, player, description
+            }).await
+        }
+    };
+}
+
 impl<H: EventHandlers + Clone> NodeRef<H> {
-    fn new(config: NodeConfig<H>) -> Self {
+    fn new(config: NodeInfo<H>) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
         rest_headers.insert(
@@ -183,7 +265,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         // Initialize internal state shared with the socket.
         let state = Arc::new(NodeState {
             players: RwLock::new(HashMap::new()),
-            stats: RwLock::new(InternalStats::new())
+            stats: RwLock::new(None)
         });
 
         Self {
@@ -206,10 +288,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                     return match response.json::<NodeStats>().await {
                         Ok(stats) => {
                             // Tries to update the current uptime.
-                            let mut current_stats = self.state.stats
-                                .write()
-                                .await;
-                            current_stats.maybe_update(&stats);
+                            self.state.maybe_update_stats(&stats).await;
 
                             Ok(stats)
                         },
@@ -293,17 +372,20 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
 
         // Spawn web socket receiver loop.
         let handler = tokio::spawn(async move {
+            let mut result = Ok(());
+
             loop {
                 tokio::select! {
-                    _ = &mut rx => // Got notified to close the connection.
-                        return ws_reader
+                    _ = &mut rx => { // Got notified to close the connection.
+                        result = ws_reader
                             .close()
-                            .await,
+                            .await;
+                        break
+                    }
                     result = ws_reader.process_next() => {
                         let raw = match result {
                             Ok(Some(contained_raw)) => contained_raw,
-                            Ok(None) => // Terminates execution.
-                                return Ok(()),
+                            Ok(None) => break, // Terminates execution.
                             Err(e) => {
                                 let chandlers = handlers.clone();
                                 let event = WsClientErrorEvent {
@@ -344,58 +426,49 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                         // Process operation.
                         match op_type {
                             OpType::PlayerUpdate(op) => {
-                                // TODO:
-                                let _ = op;
+                                let players = state.players
+                                    .read()
+                                    .await;
+                                match players.get(op.guild_id) {
+                                    Some(player) => {
+                                        // TODO:
+                                        let _ = op;
+                                        let _ = player;
+                                    }
+                                    None => continue,
+                                }
                             }
                             OpType::Stats(op) => {
-                                state.stats
-                                    .write()
-                                    .await
-                                    .maybe_update(&op.stats);
+                                state.maybe_update_stats(&op.stats).await
                             }
                             OpType::Event(op) => {
-                                let chandlers = handlers.clone();
-                                let cnode = node.clone();
-
-                                match op.event {
-                                    EventType::TrackStart(_) => {
-                                        // TODO:
+                                let players = state.players
+                                    .read()
+                                    .await;
+                                match players.get(op.guild_id) {
+                                    Some(player) => {
+                                        let chandlers = handlers.clone();
+                                        let cnode = node.clone();
+                                        tokio::spawn(
+                                            process_event(
+                                                op.event, chandlers,
+                                                cnode, player.clone()
+                                            )
+                                        );
                                     }
-                                    EventType::TrackEnd(_) => {
-                                        // TODO:
-                                    }
-                                    EventType::TrackException(_) => {
-                                        // TODO:
-                                    }
-                                    EventType::TrackStuck(_) => {
-                                        // TODO:
-                                    }
-                                    EventType::WebSocketClosed(description) => {
-                                        let event = DiscordWsClosedEvent {
-                                            node: cnode,
-                                            description,
-                                        };
-                                        tokio::spawn(async move {
-                                            chandlers
-                                                .on_discord_ws_closed(event)
-                                                .await;
-                                        });
-
-                                        // We can't do anything about that.
-                                        return ws_reader
-                                            .close()
-                                            .await;
-                                    }
+                                    None => continue,
                                 }
-                                let _ = op;
                             }
-                            _ => () // ready op was already processed
+                            _ => () // Ready op was already processed.
                         }
                     }
                 };
             }
 
-            Ok(())
+            // Clear node stats.
+            state.clear_stats().await;
+
+            result
         });
 
         // Set web socket alerter so it can be explicitly closed later.
@@ -432,7 +505,7 @@ pub struct Node<H: EventHandlers> {
 }
 
 impl<H: EventHandlers + Clone> Node<H> {
-        fn new(config: NodeConfig<H>) -> Self {
+        fn new(config: NodeInfo<H>) -> Self {
         let mut node = Self {
             inner: Arc::new(NodeRef::new(config))
         };
@@ -484,7 +557,7 @@ impl<H: EventHandlers> NodeManagerRef<H> {
     /// TODO: explain panic at reqwest::Client creation...
     pub async fn add_node(
         &self,
-        info: NodeInfo
+        info: NodeConfig
     ) -> Result<(), RustyError> {
         todo!()
     }

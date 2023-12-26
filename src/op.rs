@@ -4,14 +4,12 @@
 
 use serde::Deserialize;
 
-use crate::node::GuildId;
 use crate::model::{
     PlayerState,
     NodeStats,
     TrackData,
     TrackEndReason,
     TrackException,
-    Milli,
     DiscordAudioWsClosed,
 };
 
@@ -23,9 +21,9 @@ pub(crate) struct ReadyOp {
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct UpdateOp {
+pub(crate) struct UpdateOp<'a> {
     #[serde(rename = "guildId")]
-    pub(crate) guild_id: GuildId,
+    pub(crate) guild_id: &'a str,
     pub(crate) state: PlayerState,
 }
 
@@ -56,7 +54,7 @@ pub(crate) struct TrackExceptionEventData {
 pub(crate) struct TrackStuckEventData {
     pub(crate) track: Box<TrackData>,
     #[serde(rename = "thresholdMs")]
-    pub(crate) threshold: Milli,
+    pub(crate) threshold: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -75,23 +73,24 @@ pub(crate) enum EventType {
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct EventOp {
+pub(crate) struct EventOp<'a> {
     #[serde(rename = "guildId")]
-    pub(crate) guild_id: GuildId,
+    pub(crate) guild_id: &'a str,
     #[serde(flatten)]
     pub(crate) event: EventType,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "op")]
-pub(crate) enum OpType {
+#[serde(bound(deserialize = "'de: 'a"))]
+pub(crate) enum OpType<'a> {
     #[serde(rename = "ready")]
     Ready(ReadyOp),
     #[serde(rename = "playerUpdate")]
-    PlayerUpdate(Box<UpdateOp>),
+    PlayerUpdate(UpdateOp<'a>),
     #[serde(rename = "stats")]
-    Stats(Box<StatsOp>),
+    Stats(StatsOp),
     #[serde(rename = "event")]
-    Event(EventOp),
+    Event(EventOp<'a>),
 }
 
