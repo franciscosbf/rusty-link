@@ -4,11 +4,10 @@
 
 use std::sync::Arc;
 
-use crate::{utils::InnerArc, node::Node};
+use crate::utils::InnerArc;
 
 /// TODO:
 pub struct PlayerRef {
-    assigned_node: Node,
 }
 
 /// TODO:
