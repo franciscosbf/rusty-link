@@ -465,7 +465,9 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                 };
             }
 
-            // Clear node stats.
+            // Reset node stats. After the socket has been closed, we don't know
+            // if the node will keep operating or not, assuming that it is
+            // running.
             state.clear_stats().await;
 
             result
