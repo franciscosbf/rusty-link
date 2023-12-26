@@ -73,7 +73,11 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// Skeleton of event handlers.
 ///
 /// Events are dispatched (i.e. calls to `EventHandlers::on_*`) as soon as their
-/// are parsed and validated right after the web socket client has received them.
+/// are parsed and validated right after the web socket client has received
+/// them.
+///
+/// If the implementation of `EventHandlers` is composed of some other types,
+/// then they must implement [`Send`] and [`Sync`] as well.
 ///
 /// # Event Handlers Scheduling
 ///
@@ -94,7 +98,7 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// // FutureExt trait extension is necessary to get access to `boxed` method.
 /// use futures_util::future::{BoxFuture, FutureExt};
 ///
-/// # struct BotState { }
+/// # struct BotState;
 /// # impl BotState {
 /// #     async fn register_started_track(&self, _ :TrackStartEvent) { }
 /// # }
