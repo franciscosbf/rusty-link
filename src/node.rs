@@ -24,7 +24,7 @@ use crate::event::{
     TrackExceptionEvent,
     TrackStuckEvent
 };
-use crate::model::{NodeStats, ApiError};
+use crate::model::NodeStats;
 use crate::op::{ReadyOp, OpType, EventType};
 use crate::player::Player;
 use crate::utils::{InnerArc, process_request};
@@ -280,7 +280,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         }
     }
 
-    /// Stores a reference of its parent.
+    /// Stores a reference of its wrapper.
     fn set_wrapper(&mut self, node: Node<H>) {
         self.node.replace(node);
     }
@@ -484,7 +484,7 @@ pub struct Node<H: EventHandlers> {
 }
 
 impl<H: EventHandlers + Clone> Node<H> {
-        fn new(config: NodeInfo<H>) -> Self {
+    fn new(config: NodeInfo<H>) -> Self {
         let mut node = Self { inner: Arc::new(NodeRef::new(config)) };
 
         // Stores a cloned reference of node in the inner instance.
