@@ -77,7 +77,7 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// them.
 ///
 /// If the implementation of `EventHandlers` is composed of some other types,
-/// then they must implement [`Send`] and [`Sync`] as well.
+/// then they must implement `Send` and `Sync` as well.
 ///
 /// # Event Handlers Scheduling
 ///
@@ -88,7 +88,8 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 ///
 /// Most likely each `EventHandlers::on_*` has to do some setup before returning
 /// the proper event handler. Try to minimize the impact of those operations,
-/// otherwise you may end up flooding the internal dispatcher.
+/// since the intention of each handler is to run concurrently as soon as
+/// possible.
 ///
 /// # Example
 ///
@@ -108,8 +109,7 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 ///
 /// impl EventHandlers for Handlers {
 ///     fn on_track_start(
-///         &self,
-///         event: TrackStartEvent
+///         &self, event: TrackStartEvent
 ///     ) -> BoxFuture<'static, ()> {
 ///         let state = self.bot_state.clone();
 ///
@@ -120,36 +120,31 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 ///
 ///     // The same goes for the reamining handlers...
 ///     # fn on_track_end(
-///     #     &self,
-///     #     _: TrackEndEvent
+///     #     &self, _: TrackEndEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
 ///     # fn on_track_exception(
-///     #     &self,
-///     #     _: TrackExceptionEvent
+///     #     &self, _: TrackExceptionEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
 ///     # fn on_track_stuck(
-///     #     &self,
-///     #     _: TrackStuckEvent
+///     #     &self, _: TrackStuckEvent
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
 ///     # fn on_discord_ws_closed<H: EventHandlers>(
-///     #     &self,
-///     #     _: DiscordWsClosedEvent<H>
+///     #     &self, _: DiscordWsClosedEvent<H>
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
 ///     #
 ///     # fn on_ws_client_error<H: EventHandlers>(
-///     #     &self,
-///     #     _: WsClientErrorEvent<H>
+///     #     &self, _: WsClientErrorEvent<H>
 ///     # ) -> BoxFuture<'static, ()> {
 ///     #     async { }.boxed()
 ///     # }
@@ -158,37 +153,31 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 pub trait EventHandlers: Send + Sync + 'static {
     /// Receives the next [`TrackStartEvent`].
     fn on_track_start(
-        &self,
-        event: TrackStartEvent
+        &self, event: TrackStartEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`TrackEndEvent`].
     fn on_track_end(
-        &self,
-        event: TrackEndEvent
+        &self, event: TrackEndEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`TrackExceptionEvent`].
     fn on_track_exception(
-        &self,
-        event: TrackExceptionEvent
+        &self, event: TrackExceptionEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`TrackStuckEvent`].
     fn on_track_stuck(
-        &self,
-        event: TrackStuckEvent
+        &self, event: TrackStuckEvent
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`DiscordWsClosedEvent`].
     fn on_discord_ws_closed<H: EventHandlers>(
-        &self,
-        event: DiscordWsClosedEvent<H>
+        &self, event: DiscordWsClosedEvent<H>
     ) -> BoxFuture<'static, ()>;
 
     /// Receives the next [`WsClientErrorEvent`].
     fn on_ws_client_error<H: EventHandlers>(
-        &self,
-        event: WsClientErrorEvent<H>
+        &self, event: WsClientErrorEvent<H>
     ) -> BoxFuture<'static, ()>;
 }

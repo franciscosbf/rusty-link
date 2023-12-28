@@ -17,35 +17,38 @@ pub(crate) enum EventMetric {
 
 use self::EventMetric::*;
 
-pub(crate) struct PlayerPenalty {
-    cached_events: RwLock<LruCache<Timestamp, Events>>,
+pub(crate) struct NodePenalty {
+    events: RwLock<LruCache<Timestamp, Events>>,
     minute: Duration,
 }
 
-impl PlayerPenalty {
+impl NodePenalty {
+    /// Creates a new node penalty manager that keeps only the most recent
+    /// reported events up to `cached_events`.
     pub(crate) fn new(cached_events: NonZeroUsize) -> Self {
         Self {
-            cached_events: RwLock::new(LruCache::new(cached_events)),
+            events: RwLock::new(LruCache::new(cached_events)),
             minute: Duration::minutes(1),
         }
     }
 
+    /// Increments the counter of `event` in the current minute in the current
+    /// UTC.
     pub(crate) async fn register_event(&self, event: EventMetric) {
         // Truncates the date in the current minute.
-        let truncated_timestamp = Utc::now()
-            .duration_trunc(self.minute)
-            .unwrap()
-            .timestamp();
+        let truncated_timestamp = Utc::now().duration_trunc(self.minute)
+            .unwrap().timestamp();
 
-        let mut cached = self.cached_events.write().await;
+        let mut cached = self.events.write().await;
 
         // If there's an entry in the truncated date, creates a new one.
         let events = cached.get_or_insert_mut(truncated_timestamp, || [0; 4]);
         events[event as usize] += 1;
     }
 
+    /// Sums the current cached window of event counters.
     async fn cumulative_events(&self) -> Events {
-        let cached = self.cached_events.read().await;
+        let cached = self.events.read().await;
 
         let mut sum: Events = [0; 4];
 
@@ -59,6 +62,13 @@ impl PlayerPenalty {
         sum
     }
 
+    /// Calculates the node penalty.
+    ///
+    /// # Side Note
+    ///
+    /// This has a bunch of gibberish ported from the official (at least until
+    /// the date I wrote this...) Lavalink client made in Kotlin. Most of the
+    /// calculations are magic for me.
     pub(crate) async fn penalty(&self, stats: NodeStats) -> u64 {
         let events = self.cumulative_events().await;
 
