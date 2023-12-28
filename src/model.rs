@@ -460,8 +460,7 @@ pub struct NodeStats {
     pub memory: Memory,
     /// The cpu stats of the node.
     pub cpu: Cpu,
-    /// The frame stats of the node. None if node has no players or when
-    /// retrieved via /v4/stats. TODO: change endpoint to the calling method.
+    /// The frame stats of the node. None if node has no players.
     #[serde(rename = "frameStats")]
     pub frame_stats: Option<FrameStats>,
 }
