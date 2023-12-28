@@ -50,6 +50,9 @@ pub enum RustyError {
     /// The server sent a close message.
     #[error("web socket client received a close message from node")]
     ImmediateWebSocketClose,
+    /// When the web socket connection is already stablished.
+    #[error("there's already a web socket running")]
+    DuplicatedWebSocketError,
 }
 
 pub use self::RustyError::*;
