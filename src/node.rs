@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
-use tokio::sync::{oneshot, RwLock, Mutex};
+use tokio::sync::{oneshot, RwLock};
 use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::protocol::Message;
 
@@ -27,7 +27,7 @@ use crate::event::{
 use crate::model::{NodeStats, ApiError};
 use crate::op::{ReadyOp, OpType, EventType};
 use crate::player::Player;
-use crate::utils::InnerArc;
+use crate::utils::{InnerArc, process_request};
 
 /// Discord guild identifier.
 pub type GuildId = String;
@@ -44,8 +44,6 @@ pub struct NodeConfig {
     /// Unique identifier used internally to query the node (it's what you
     /// want).
     pub name: NodeName,
-    /// Tells if we want to resume session after the socket has been closed.
-    pub preserve_session: bool,
     pub host: String,
     pub port: u16,
     pub secure: bool,
@@ -133,7 +131,6 @@ impl InternalStats {
 struct NodeInfo<H: EventHandlers> {
     bot_user_id: BotId,
     password: String,
-    keep_session: bool,
     ws_url: Url,
     rest_url: Url,
     handlers: Arc<H>,
@@ -174,14 +171,24 @@ impl NodeState {
     }
 }
 
-/// Gives node access to close web socket.
-struct WebSocketAlert {
-    last_session_id: String,
+struct NodeSession {
+    keep: bool,
+    last: Option<String>,
+}
+
+impl NodeSession {
+    fn new() -> Self {
+        Self { keep: false, last: None }
+    }
+}
+
+/// Gives node access to close the current web socket connection.
+struct WsAlerter {
     tx: oneshot::Sender<()>,
     handler: JoinHandle<Result<(), RustyError>>,
 }
 
-impl WebSocketAlert {
+impl WsAlerter {
     // Notifies web socket reader to close and awaits for its result.
     async fn close(self) -> Result<(), RustyError> {
         // Orders to shutdown, despite of if the handler has already terminated
@@ -196,13 +203,28 @@ impl WebSocketAlert {
     }
 }
 
+struct WsConn {
+    session: NodeSession,
+    /// Refers to the current active session, if any.
+    alerter: Option<WsAlerter>,
+}
+
+impl WsConn {
+    fn new() -> Self {
+        Self {
+            session: NodeSession::new(),
+            alerter: None
+        }
+    }
+}
+
 /// TODO:
 pub struct NodeRef<H: EventHandlers> {
     node: Option<Node<H>>,
     config: NodeInfo<H>,
     state: Arc<NodeState>,
     client: reqwest::Client,
-    ws_alerter: Mutex<Option<WebSocketAlert>>,
+    ws_conn: Arc<RwLock<WsConn>>,
 }
 
 /// Dispatches an event and awaits for its execution.
@@ -270,7 +292,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
 
         Self {
             node: None, config, state, client,
-            ws_alerter: Mutex::new(None),
+            ws_conn: Arc::new(RwLock::new(WsConn::new())),
         }
     }
 
@@ -281,37 +303,23 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
     /// TODO:
     pub async fn get_stats(&self) -> Result<NodeStats, RustyError> {
         let url = self.config.rest_url.join("stats").unwrap();
+        let request = self.client.get(url).send();
 
-        match self.client.get(url).send().await {
-            Ok(response) => {
-                if response.status() == reqwest::StatusCode::OK {
-                    return match response.json::<NodeStats>().await {
-                        Ok(stats) => {
-                            // Tries to update the current uptime.
-                            self.state.maybe_update_stats(&stats).await;
+        let stats = process_request(request).await?;
 
-                            Ok(stats)
-                        },
-                        Err(e) => Err(RustyError::ParseResponseError(e)),
-                    };
-                }
+        // Tries to update the current uptime.
+        self.state.maybe_update_stats(&stats).await;
 
-                // Tries to parse the API error.
-                match response.json::<ApiError>().await {
-                    Ok(error) => Err(RustyError::InstanceError(error)),
-                    Err(e) => Err(RustyError::ParseResponseError(e)),
-                }
-            }
-            Err(e) => Err(RustyError::RequestError(e)),
-        }
+        Ok(stats)
     }
 
     /// TODO:
     pub async fn connect(&self) -> Result<bool, RustyError> {
-        let mut ws_alerter = self.ws_alerter.lock().await;
+        let mut ws_conn = self.ws_conn.write().await;
 
-        if ws_alerter.is_some() {
-            return Ok(false); // Doesn't make sense trying to connect again.
+        if ws_conn.alerter.is_some() {
+            // Doesn't make sense trying to connect again.
+            return Err(RustyError::DuplicatedWebSocketError);
         }
 
         // Build partial web socket client request.
@@ -323,12 +331,10 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
 
         // Build request based on last session id (if any) and if we want to
         // resume the current local state.
-        if ws_alerter.is_some() && self.config.keep_session {
-            let session_id = ws_alerter
+        if ws_conn.session.keep && ws_conn.session.last.is_some() {
+            let session_id = ws_conn.session.last
                 .as_ref()
-                .unwrap()
-                .last_session_id
-                .as_str();
+                .unwrap();
             request_builder = request_builder
                 .header("Session-Id", session_id);
         }
@@ -349,7 +355,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
 
         let mut ws_reader = WebSocketReader { stream };
 
-        // Awaits for ready operation and tries to parse it.
+        // Awaits for ready operation and parses it.
         let raw = match ws_reader.process_next().await? {
             Some(raw) => raw,
             None => return Err(RustyError::MissingReadyMessage),
@@ -364,18 +370,17 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         let node = self.node.as_ref().unwrap().clone();
         let handlers = self.config.handlers.clone();
         let state = self.state.clone();
+        let cws_conn = self.ws_conn.clone();
         let (tx, mut rx) = oneshot::channel();
 
         // Spawn web socket receiver loop.
         let handler = tokio::spawn(async move {
-            let mut result = Ok(());
+            let mut close_result = None;
 
             loop {
                 tokio::select! {
                     _ = &mut rx => { // Got notified to close the connection.
-                        result = ws_reader
-                            .close()
-                            .await;
+                        close_result = Some(ws_reader.close().await);
                         break
                     }
                     result = ws_reader.process_next() => {
@@ -461,19 +466,25 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                 };
             }
 
+            // Reset web socket reader alerter.
+            if close_result.is_none() {
+                cws_conn
+                    .write()
+                    .await
+                    .alerter
+                    .take();
+            }
+
             // Reset node stats. After the socket has been closed, we don't know
             // if the node will keep operating or not, assuming that it is
             // running.
             state.clear_stats().await;
 
-            result
+            close_result.unwrap_or_else(|| Ok(()))
         });
 
         // Set web socket alerter so it can be explicitly closed later.
-        let ws_notify = WebSocketAlert {
-            last_session_id: ready_op.session_id, tx, handler
-        };
-        *ws_alerter = Some(ws_notify);
+        ws_conn.alerter = Some(WsAlerter { tx, handler });
 
         Ok(ready_op.resumed)
     }
@@ -482,13 +493,14 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
     ///
     /// Returns Ok if connection isn't open or the clone operation succeeded.
     pub async fn close(&self) -> Result<(), RustyError> {
-        let mut ws_alerter = self.ws_alerter.lock().await;
+        let mut ws_conn = self.ws_conn.write().await;
 
-        if ws_alerter.is_none() {
-            return Ok(()); // There's no connection with the node.
+        if ws_conn.alerter.is_none() {
+            // There's no connection with the node.
+            return Ok(());
         }
 
-        ws_alerter
+        ws_conn.alerter
             .take()
             .unwrap()
             .close()
