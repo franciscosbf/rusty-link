@@ -148,6 +148,9 @@ impl NodeState {
     ///
     /// If `kind` is [`Endpoint`], preserves the [FrameStats] if present.
     ///
+    /// If the current state contains frame stats, then `new` will have a copy
+    /// of it.
+    ///
     /// [FrameStats]: crate::model::FrameStats
     async fn maybe_update_stats(&self, new: &mut NodeStats, kind: StatsUpKind) {
         let mut stats = self.stats
@@ -164,6 +167,7 @@ impl NodeState {
             if matches!(kind, Endpoint) && stats_ref.frame_stats.is_some() {
                 // Preserve frame stats.
                 new.frame_stats = stats_ref.frame_stats;
+                // WARN: can I improve this by changing how NodeStats is parsed?
             }
             stats.replace(*new);
         }
