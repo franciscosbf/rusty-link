@@ -105,28 +105,6 @@ impl WebSocketReader {
     }
 }
 
-struct InternalStats {
-    data: Option<NodeStats>,
-}
-
-impl InternalStats {
-    fn new() -> Self {
-        Self { data: None }
-    }
-
-    /// Updates only if new uptime is greater than the current one.
-    fn maybe_update(&mut self, new: &NodeStats) {
-        if self.data.is_none() {
-            self.data.replace(*new);
-            return;
-        }
-
-        if self.data.as_ref().unwrap().uptime < new.uptime {
-            self.data.replace(*new);
-        }
-    }
-}
-
 /// General data that can be accessed by all node operations.
 struct NodeInfo<H: EventHandlers> {
     bot_user_id: BotId,
@@ -135,6 +113,13 @@ struct NodeInfo<H: EventHandlers> {
     rest_url: Url,
     handlers: Arc<H>,
 }
+
+/// Simple marker to indicate where are the new node stats update comming from.
+enum StatsUpKind {
+    WebSocket, Endpoint
+}
+
+use self::StatsUpKind::*;
 
 struct NodeState {
     players: RwLock<HashMap<GuildId, Player>>,
@@ -160,12 +145,26 @@ impl NodeState {
     }
 
     /// Update stats if the uptime of `new` is greater than the current one.
-    async fn maybe_update_stats(&self, new: &NodeStats) {
+    ///
+    /// If `kind` is [`Endpoint`], preserves the [FrameStats] if present.
+    ///
+    /// [FrameStats]: crate::model::FrameStats
+    async fn maybe_update_stats(&self, new: &mut NodeStats, kind: StatsUpKind) {
         let mut stats = self.stats
             .write()
             .await;
 
-        if stats.is_none() || stats.as_ref().unwrap().uptime < new.uptime {
+        if stats.is_none() {
+            stats.replace(*new);
+            return;
+        }
+
+        let stats_ref = stats.as_ref().unwrap();
+        if stats_ref.uptime < new.uptime {
+            if matches!(kind, Endpoint) && stats_ref.frame_stats.is_some() {
+                // Preserve frame stats.
+                new.frame_stats = stats_ref.frame_stats;
+            }
             stats.replace(*new);
         }
     }
@@ -301,16 +300,23 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
     }
 
     /// TODO:
-    pub async fn get_stats(&self) -> Result<NodeStats, RustyError> {
+    pub async fn fetch_stats(&self) -> Result<NodeStats, RustyError> {
         let url = self.config.rest_url.join("stats").unwrap();
         let request = self.client.get(url).send();
 
-        let stats = process_request(request).await?;
+        let mut stats = process_request(request).await?;
 
         // Tries to update the current uptime.
-        self.state.maybe_update_stats(&stats).await;
+        self.state.maybe_update_stats(
+            &mut stats, StatsUpKind::Endpoint
+        ).await;
 
         Ok(stats)
+    }
+
+    /// TODO:
+    pub async fn get_stats(&self) -> Option<NodeStats> {
+        *self.state.stats.read().await
     }
 
     /// TODO:
@@ -439,8 +445,10 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                                     None => continue,
                                 }
                             }
-                            OpType::Stats(op) => {
-                                state.maybe_update_stats(&op.stats).await
+                            OpType::Stats(mut op) => {
+                                state.maybe_update_stats(
+                                    &mut op.stats, StatsUpKind::WebSocket
+                                ).await
                             }
                             OpType::Event(op) => {
                                 let players = state.players
