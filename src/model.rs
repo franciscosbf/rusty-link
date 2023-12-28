@@ -442,7 +442,7 @@ pub struct FrameStats {
     /// The amount of frames that were nulled.
     pub nulled: u64,
     /// The difference between sent frames and the expected amount of frames.
-    pub deficit: u64,
+    pub deficit: i64,
 }
 
 /// Collection of statistics reported by a node.
