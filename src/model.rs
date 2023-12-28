@@ -18,6 +18,8 @@ use serde_json::value::RawValue;
 type GuildId = String;
 /// Milliseconds representation.
 pub type Milli = u64;
+/// Seconds representation.
+pub type Secs = u64;
 /// HTTP status code.
 pub type StatusCode = u16;
 /// Player volume.
@@ -521,6 +523,44 @@ pub struct DiscordAudioWsClosed {
     /// Whether the connection was closed by Discord.
     #[serde(rename = "byRemote")]
     pub remote: bool,
+}
+
+/// To update the node session state.
+#[derive(Serialize, Debug)]
+pub struct SessionState {
+    /// Whether resuming is enabled for this session or not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resuming: Option<bool>,
+    /// The timeout in seconds (default is 60 seconds).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<Secs>,
+}
+
+impl SessionState {
+    /// Sets resuming only, leaving the other in its current state.
+    pub fn resuming_only(resuming: bool) -> Self {
+        Self {
+            resuming: Some(resuming),
+            timeout: None
+        }
+    }
+
+    /// Sets timeout only, leaving the other in its current state.
+    pub fn timeout_only(timeout: Secs) -> Self {
+        Self {
+            resuming: None,
+            timeout: Some(timeout)
+        }
+    }
+}
+
+/// To report the node session state.
+#[derive(Deserialize, Debug)]
+pub struct CurrentSessionState {
+    /// Whether resuming is enabled for this session or not.
+    pub resuming: bool,
+    /// The timeout in seconds.
+    pub timeout: Secs,
 }
 
 // TODO: route planners data...
