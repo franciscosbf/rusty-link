@@ -2,9 +2,8 @@
 
 // ############### NodeManagerError ###############
 
+use thiserror::Error;
 use tokio_tungstenite::tungstenite;
-
-use std::{fmt::{Display, Debug}, error::Error};
 
 use crate::model::ApiError;
 
@@ -12,64 +11,45 @@ use crate::model::ApiError;
 pub type ParseDescription = String;
 
 /// Client API errors.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum RustyError {
     /// When selecting a node for a given Discord guild, this value is returned
     /// if there aren't registered nodes.
-    Empty,
+    #[error("there's any registered node")]
+    WithoutNodes,
     /// When selecting a node for a given Discord guild, there's the possibility
-    /// that all nodes aren't available due to unknown connection issues.
-    Unavailable,
+    /// that all nodes aren't available due to unknown connection issues or the
+    /// web socket isn't connected to them.
+    #[error("there isn't any available node")]
+    UnavailableNodes,
     /// When trying to insert a new node that's already registered.
-    Duplicated,
+    #[error("the node name that your are trying to register is in use")]
+    DuplicatedNode,
     /// When couldn't find a node with a given identifier.
-    Missing,
+    #[error("name doesn't match any registered node")]
+    MissingNode,
     /// The response content is corrupted.
-    ParseError(ParseDescription),
+    #[error("while trying to parse response: {0}")]
+    ParseResponseError(#[source] reqwest::Error),
+    /// The received web socket message is corrupted.
+    #[error("while trying to parse response: {0}")]
+    ParseSocketMessageError(#[source] serde_json::Error),
     /// The client received an error response from the node.
+    #[error("error response returned by node: {0}")]
     InstanceError(ApiError),
     /// The returned error isn't related to some node operation.
-    RequestError(reqwest::Error),
+    #[error("client API error: {0}")]
+    RequestError(#[source] reqwest::Error),
     /// The web socket connection returned an error.
-    WebSocketError(tungstenite::Error),
-    /// If after establishing the web socket connection, the server didn't send
-    /// a confirmation message.
+    #[error("web socket client error: {0}")]
+    WebSocketError(#[source] tungstenite::Error),
+    /// After establishing the web socket connection, the server didn't send a
+    /// confirmation message.
+    #[error("didn't got from node the ready operation message")]
     MissingReadyMessage,
-    /// The web socket returned an unexpected close message.
+    /// The server sent a close message.
+    #[error("web socket client received a close message from node")]
     ImmediateWebSocketClose,
-    /// When the received message from web socket isn't of type text.
-    UnexpectedMessage,
 }
 
 pub use self::RustyError::*;
-
-impl Display for RustyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            RustyError::Empty =>
-                write!(f, "there aren't registered nodes"),
-            RustyError::Unavailable =>
-                write!(f, "all nodes aren't available"),
-            RustyError::Duplicated =>
-                write!(f, "duplicated node"),
-            RustyError::Missing =>
-                write!(f, "missing node"),
-            RustyError::ParseError(ref desc) =>
-                write!(f, "corrupted message: {}", desc),
-            RustyError::InstanceError(ref error) =>
-                <ApiError as Display>::fmt(error, f),
-            RustyError::RequestError(ref error) =>
-                <reqwest::Error as Display>::fmt(error, f),
-            RustyError::WebSocketError(ref error) =>
-                <tungstenite::Error as Display>::fmt(error, f),
-            RustyError::MissingReadyMessage =>
-                write!(f, "ready message not received by web socket server"),
-            RustyError::ImmediateWebSocketClose =>
-                write!(f, "web socket sent an unexpected close message"),
-                RustyError::UnexpectedMessage =>
-                write!(f, "got unexpected message from web socket"),
-        }
-    }
-}
-
-impl Error for RustyError { }

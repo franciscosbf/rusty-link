@@ -292,14 +292,14 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
 
                             Ok(stats)
                         },
-                        Err(e) => Err(RustyError::ParseError(e.to_string())),
+                        Err(e) => Err(RustyError::ParseResponseError(e)),
                     };
                 }
 
                 // Tries to parse the API error.
                 match response.json::<ApiError>().await {
                     Ok(error) => Err(RustyError::InstanceError(error)),
-                    Err(e) => Err(RustyError::ParseError(e.to_string())),
+                    Err(e) => Err(RustyError::ParseResponseError(e)),
                 }
             }
             Err(e) => Err(RustyError::RequestError(e)),
@@ -357,11 +357,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         let ready_op = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
             Ok(ready_op) => ready_op,
             Err(e) =>
-                return Err(
-                    RustyError::ParseError(
-                        format!("invalid ready operation message: {e}")
-                    )
-                ),
+                return Err(RustyError::ParseSocketMessageError(e)),
         };
 
         // Prepare data structs to be moved to web socket receiver loop.
@@ -410,9 +406,9 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                                 let chandlers = handlers.clone();
                                 let event = WsClientErrorEvent {
                                     node: node.clone(),
-                                    error: Box::new(RustyError::ParseError(
-                                        format!("on parse operation: {e}")
-                                    )),
+                                    error: Box::new(
+                                        RustyError::ParseSocketMessageError(e)
+                                    ),
                                 };
                                 tokio::spawn(async move {
                                     chandlers
