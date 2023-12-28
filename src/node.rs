@@ -299,6 +299,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         }
     }
 
+    /// Stores a reference of its parent.
     fn set_wrapper(&mut self, node: Node<H>) {
         self.node.replace(node);
     }
