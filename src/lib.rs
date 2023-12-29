@@ -21,3 +21,6 @@ pub mod node;
 pub mod player;
 pub mod queue;
 pub mod error;
+
+// To implement the event handler.
+pub use async_trait::async_trait;
