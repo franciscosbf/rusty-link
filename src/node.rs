@@ -264,14 +264,10 @@ impl NodeRef {
     fn new(config: NodeInternals) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
-        rest_headers.insert(
-            "Authorization", HeaderValue::from_str(&config.password).unwrap()
-        );
+        rest_headers.insert("Authorization", HeaderValue::from_str(&config.password).unwrap());
 
         // Build REST client.
-        let client = reqwest::Client::builder()
-            .default_headers(rest_headers)
-            .build()
+        let client = reqwest::Client::builder().default_headers(rest_headers).build()
             .expect(""); // TODO: write this msg.
 
         let state = Arc::new(NodeState::new());
@@ -327,8 +323,8 @@ impl NodeRef {
             .header("Authorization", self.config.password.as_str())
             .header("Client-Name", CLIENT_NAME);
 
-        // Build request based on last session id (if any) and if we want to
-        // resume the current local state.
+        // Build request based on last session id (if any) and if we want to resume the current
+        // local state.
         if ws_conn.session.keep && ws_conn.session.last.is_some() {
             let session_id = ws_conn.session.last.as_ref().unwrap();
             request_builder = request_builder.header("Session-Id", session_id);
@@ -336,10 +332,10 @@ impl NodeRef {
         let request = request_builder.body(()).unwrap();
 
         // Try to stablish a connection.
-        let res = tokio_tungstenite::connect_async(request).await;
-        // Response is ignored since we will verify if session was restored
-        // after receiving the first operation (aka ready op).
-        let (stream, _) = match res {
+        //
+        // Response is ignored since we will verify if the session was restored after receiving
+        // the first operation (aka ready op).
+        let (stream, _) = match tokio_tungstenite::connect_async(request).await {
             Ok(content) => content,
             Err(e) => {
                 return Err(RustyError::WebSocketError(e));
@@ -438,12 +434,9 @@ impl NodeRef {
                                     Some(player) => {
                                         let chandlers = Arc::clone(&handlers);
                                         let cnode = node.clone();
-                                        tokio::spawn(
-                                            process_event(
-                                                op.event, chandlers,
-                                                cnode, player.clone()
-                                            )
-                                        );
+                                        tokio::spawn(process_event(
+                                            op.event, chandlers, cnode, player.clone()
+                                        ));
                                     }
                                     None => continue,
                                 }

@@ -1,10 +1,10 @@
 //! Payloads to control Lavalink players.
 //!
-//! Some of them are used to fetch metadata about tracks, playlists or even
-//! results from a search engine result (e.g., `ytsearch`, `soundcloud`).
+//! Some of them are used to fetch metadata about tracks, playlists or even results from a search
+//! engine result (e.g., `ytsearch`, `soundcloud`).
 //!
-//! Theres're also structs that contain the current internal state of a given
-//! node and route planner configuration.
+//! Theres're also structs that contain the current internal state of a given node and route
+//! planner configuration.
 //! TODO: last one not implemented yet.
 
 use std::{collections::HashMap, fmt::Display};
@@ -37,9 +37,8 @@ pub type CloseEventCode = u16;
 
 /// Contains the decoded error metadata.
 ///
-/// This error is returned by some Lavalink instance upon an unexpected
-/// behaviour while loading tracks or controling the players trough its
-/// REST API.
+/// This error is returned by some Lavalink instance upon an unexpected behaviour while loading
+/// tracks or controling the players trough its REST API.
 ///
 /// Note that trace is ommited here, since it isn't set in any call to the API.
 #[derive(Deserialize, Debug)]
@@ -162,8 +161,7 @@ pub enum LoadResult {
 
 pub use self::LoadResult::*;
 
-/// Represents the player state (e.g., if is connected, current track
-/// position...).
+/// Represents the player state (e.g., if is connected, current track position...).
 #[derive(Deserialize, Debug)]
 #[allow(dead_code)]
 pub struct PlayerState {
@@ -193,9 +191,9 @@ pub struct PlayerVoiceState {
 
 /// Represents an equilizer band.
 ///
-/// The [`gain`] is the multiplier for the given band (defaults to 0). -0.25
-/// means the given band is completely muted, while 0.25 means it's doubled.
-/// Besides that, it may change the volume of the output.
+/// The [`gain`] is the multiplier for the given band (defaults to 0). -0.25 means the given band
+/// is completely muted, while 0.25 means it's doubled. Besides that, it may change the volume of
+/// the output.
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Equalizer {
@@ -241,8 +239,7 @@ pub struct Timescale {
     pub rate: Option<f64>,
 }
 
-/// Create a shuddering effect by using amplification, where the volume quicky
-/// oscillates.
+/// Create a shuddering effect by using amplification, where the volume quicky oscillates.
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Tremolo {
@@ -266,8 +263,7 @@ pub struct Vibrato {
     pub depth: Option<f64>,
 }
 
-/// Rotates the sound around the stereo channels/user headphones (also known as
-/// Audio Panning).
+/// Rotates the sound around the stereo channels/user headphones (also known as Audio Panning).
 #[derive(Deserialize, Serialize, Debug)]
 #[allow(dead_code)]
 pub struct Rotation {
@@ -306,8 +302,8 @@ pub struct Distortion {
     pub scale: Option<f64>,
 }
 
-/// Mixes both channels (left and right), with a configurable factor on how much
-/// each channel affects the other.
+/// Mixes both channels (left and right), with a configurable factor on how much each channel
+/// affects the other.
 ///
 /// With the defaults, both channels are kept independent of each other.
 ///
@@ -332,8 +328,8 @@ pub struct ChannelMix {
     pub right_to_right: Option<f64>,
 }
 
-/// Higher frequencies get suppressed, while lower frequencies pass through this
-/// filter, thus the name low pass.
+/// Higher frequencies get suppressed, while lower frequencies pass through this filter, thus the
+/// name low pass.
 ///
 /// Any smoothing values <= 1.0 will disable the filter.
 #[derive(Deserialize, Serialize, Debug)]
@@ -486,19 +482,17 @@ pub enum TrackEndReason {
 #[derive(Deserialize, Debug, Clone, Copy)]
 #[serde(tag = "severity")]
 pub enum TrackExceptionSeverity {
-    /// The cause is known and expected, indicates that there is nothing wrong
-    /// with the library itself.
+    /// The cause is known and expected, indicates that there is nothing wrong with the library
+    /// itself.
     #[serde(rename = "common")]
     Common,
-    /// The cause might not be exactly known, but is possibly caused by outside
-    /// factors. For example when an outside service responds in a format that
-    /// we do not expect
+    /// The cause might not be exactly known, but is possibly caused by outside factors. For
+    /// example when an outside service responds in a format that we do not expect.
     #[serde(rename = "suspicious")]
     Suspicious,
-    /// The probable cause is an issue with the library or there is no way to
-    /// tell what the cause might be. This is the default level and other levels
-    /// are used in cases where the thrower has more in-depth knowledge about
-    /// the error
+    /// The probable cause is an issue with the library or there is no way to tell what the cause
+    /// might be. This is the default level and other levels are used in cases where the thrower
+    /// has more in-depth knowledge about the error.
     #[serde(rename = "fault")]
     Fault,
 }
@@ -569,18 +563,14 @@ pub struct CurrentSessionState {
 /// Deserialize an instance of `T` from a raw value.
 ///
 /// See [`serde_json::from_str`] to know more.
-pub fn parse_arbitrary<'de, T>(
-    data: &'de BoxedRawData
-) -> Result<T, serde_json::Error>
+pub fn parse_arbitrary<'de, T>(data: &'de BoxedRawData) -> Result<T, serde_json::Error>
 where
     T: serde::Deserialize<'de>
 {
     serde_json::from_str(data.get())
 }
 
-fn deserialize_selected_track<'de, D>(
-    deserializer: D
-) -> Result<Option<u64>, D::Error>
+fn deserialize_selected_track<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
 where
     D: de::Deserializer<'de>,
 {
@@ -589,13 +579,8 @@ where
     impl<'de> de::Visitor<'de> for SelectedTrackVisitor {
         type Value = Option<u64>;
 
-        fn expecting(
-            &self,
-            formatter: &mut std::fmt::Formatter
-        ) -> std::fmt::Result {
-            formatter.write_str(
-                "an integer containing the selected track index"
-            )
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer containing the selected track index")
         }
 
         fn visit_i128<E>(self, v: i128) -> Result<Self::Value, E>
@@ -609,9 +594,7 @@ where
     deserializer.deserialize_i128(SelectedTrackVisitor)
 }
 
-fn deserialize_ping<'de, D>(
-    deserializer: D
-) -> Result<Option<Milli>, D::Error>
+fn deserialize_ping<'de, D>(deserializer: D) -> Result<Option<Milli>, D::Error>
 where
     D: de::Deserializer<'de>,
 {
@@ -620,13 +603,8 @@ where
     impl<'de> de::Visitor<'de> for PingVisitor {
         type Value = Option<Milli>;
 
-        fn expecting(
-            &self,
-            formatter: &mut std::fmt::Formatter
-        ) -> std::fmt::Result {
-            formatter.write_str(
-                "an integer containing the player ping"
-            )
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("an integer containing the player ping")
         }
 
         fn visit_i128<E>(self, v: i128) -> Result<Self::Value, E>
@@ -640,9 +618,7 @@ where
     deserializer.deserialize_i128(PingVisitor)
 }
 
-fn deserialize_empty_match<'de, D>(
-    deserializer: D
-) -> Result<(), D::Error>
+fn deserialize_empty_match<'de, D>(deserializer: D) -> Result<(), D::Error>
 where
     D: de::Deserializer<'de>,
 {
@@ -651,10 +627,7 @@ where
     impl<'de> de::Visitor<'de> for EmptyMatchVisitor {
         type Value = ();
 
-        fn expecting(
-            &self,
-            formatter: &mut std::fmt::Formatter
-        ) -> std::fmt::Result {
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("a map (content doesn't matter)")
         }
 
@@ -715,9 +688,6 @@ mod test {
         let res = serde_json::from_str::<LoadResult>(raw);
         assert!(res.is_ok(), "got error: {:?}", res);
 
-        assert!(
-            matches!(res.unwrap(), EmptyMatch(())),
-            "expecting LoadResult::EmptyMatch(())"
-        );
+        assert!(matches!(res.unwrap(), EmptyMatch(())), "expecting LoadResult::EmptyMatch(())");
     }
 }
