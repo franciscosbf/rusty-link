@@ -77,7 +77,8 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// them.
 ///
 /// If the implementation of `EventHandlers` is composed of some other types,
-/// then they must implement `Send` and `Sync` as well.
+/// then they must implement `Send` and `Sync` as well. Besides that, it must
+/// at least derive Close (i.e. `#derive(Clone)`).
 ///
 /// # Event Handlers Scheduling
 ///
@@ -96,13 +97,14 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// ```
 /// # use std::sync::Arc;
 /// # use rusty_link::event::*;
-/// // FutureExt trait extension is necessary to get access to `boxed` method.
+/// // FutureExt trait extension is necessary so the `boxed` method can be used.
 /// use futures_util::future::{BoxFuture, FutureExt};
 ///
 /// # struct BotState;
 /// # impl BotState {
 /// #     async fn register_started_track(&self, _ :TrackStartEvent) { }
 /// # }
+/// #[derive(Clone)]
 /// struct Handlers {
 ///     bot_state: Arc<BotState>,
 /// }
@@ -150,7 +152,7 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 ///     # }
 /// }
 /// ```
-pub trait EventHandlers: Send + Sync + 'static {
+pub trait EventHandlers: Clone + Send + Sync + 'static {
     /// Receives the next [`TrackStartEvent`].
     fn on_track_start(
         &self, event: TrackStartEvent
