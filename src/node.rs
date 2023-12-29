@@ -5,14 +5,19 @@
 use std::sync::Arc;
 
 use hashbrown::HashMap;
-use tokio::net::TcpStream;
-use tokio::task::JoinHandle;
+use tokio::{
+    net::TcpStream,
+    task::JoinHandle,
+    sync::{oneshot, RwLock}
+};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
-use tokio::sync::{oneshot, RwLock};
 use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::{
+    protocol::Message,
+    handshake::client::generate_key
+};
 
 use crate::error::RustyError;
 use crate::event::{
@@ -36,13 +41,13 @@ pub type BotId = String;
 /// Node unique identifier.
 type NodeName = String;
 
+const CLIENT_HOST: &str = "rusty-lava";
 const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 
 /// Connection config used at node registration.
 #[allow(missing_docs)]
 pub struct NodeConfig {
-    /// Unique identifier used internally to query the node (it's what you
-    /// want).
+    /// User friendly unique identifier used internally to query the node.
     pub name: NodeName,
     pub host: String,
     pub port: u16,
@@ -52,9 +57,7 @@ pub struct NodeConfig {
 
 impl NodeConfig {
     fn parse_url(
-        &self,
-        base: &str,
-        path: &str
+        &self, base: &str, path: &str
     ) -> Result<Url, url::ParseError> {
         let raw = format!(
             "{}{}://{}:{}/v4{}", base,
@@ -127,6 +130,13 @@ struct NodeState {
 }
 
 impl NodeState {
+    fn new() -> Self {
+        Self {
+            players: RwLock::new(HashMap::new()),
+            stats: RwLock::new(None),
+        }
+    }
+
     /// Reset current stats if any.
     async fn clear_stats(&self) {
         self.stats.write().await.take();
@@ -268,19 +278,14 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
             .build()
             .expect(""); // TODO: write this msg.
 
-        // Initialize internal state shared with the socket.
-        let state = Arc::new(NodeState {
-            players: RwLock::new(HashMap::new()),
-            stats: RwLock::new(None)
-        });
+        let state = Arc::new(NodeState::new());
 
-        Self {
-            node: None, config, state, client,
-            ws_conn: Arc::new(RwLock::new(WsConn::new())),
-        }
+        let ws_conn = Arc::new(RwLock::new(WsConn::new()));
+
+        Self { node: None, config, state, client, ws_conn }
     }
 
-    /// Stores a reference of its wrapper.
+    /// Stores a reference to its wrapper.
     fn set_wrapper(&mut self, node: Node<H>) {
         self.node.replace(node);
     }
@@ -315,6 +320,13 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
+            // Web Socket base headers according to RFC 6455.
+            .header("Host", CLIENT_HOST)
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket")
+            .header("Sec-WebSocket-Key", generate_key())
+            .header("Sec-WebSocket-Version", "13")
+            // Lavalink required headers.
             .header("User-Id", self.config.bot_user_id.as_str())
             .header("Authorization", self.config.password.as_str())
             .header("Client-Name", CLIENT_NAME);
@@ -345,8 +357,12 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
             Some(raw) => raw,
             None => return Err(RustyError::MissingReadyMessage),
         };
-        let ready_op = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
-            Ok(ready_op) => ready_op,
+        let resumed = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
+            Ok(ready_op) => {
+                // Store current session id.
+                ws_conn.session.last.replace(ready_op.session_id);
+                ready_op.resumed
+            }
             Err(e) =>
                 return Err(RustyError::ParseSocketMessageError(e)),
         };
@@ -416,11 +432,10 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
                                     None => continue,
                                 }
                             }
-                            OpType::Stats(mut op) => {
+                            OpType::Stats(mut op) =>
                                 state.maybe_update_stats(
                                     &mut op.stats, StatsUpKind::WebSocket
-                                ).await
-                            }
+                                ).await,
                             OpType::Event(op) => {
                                 let players = state.players.read().await;
                                 match players.get(op.guild_id) {
@@ -449,8 +464,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
             }
 
             // Reset node stats. After the socket has been closed, we don't know
-            // if the node will keep operating or not, assuming that it is
-            // running.
+            // if the node will keep operating or not.
             state.clear_stats().await;
 
             close_result.unwrap_or_else(|| Ok(()))
@@ -459,12 +473,12 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         // Set web socket alerter so it can be explicitly closed later.
         ws_conn.alerter = Some(WsAlerter { tx, handler });
 
-        Ok(ready_op.resumed)
+        Ok(resumed)
     }
 
     /// If open, closes the web socket connection.
     ///
-    /// Returns Ok if connection isn't open or the clone operation succeeded.
+    /// Returns Ok if on success or there isn't any connection.
     pub async fn close(&self) -> Result<(), RustyError> {
         let mut ws_conn = self.ws_conn.write().await;
 
@@ -485,11 +499,13 @@ pub struct Node<H: EventHandlers> {
 
 impl<H: EventHandlers + Clone> Node<H> {
     fn new(config: NodeInfo<H>) -> Self {
-        let mut node = Self { inner: Arc::new(NodeRef::new(config)) };
+        let node = Self { inner: Arc::new(NodeRef::new(config)) };
 
         // Stores a cloned reference of node in the inner instance.
-        let cloned_node = node.clone();
-        Arc::get_mut(&mut node.inner).unwrap().set_wrapper(cloned_node);
+        unsafe {
+            let inner = &mut *(Arc::as_ptr(&node.inner) as *mut NodeRef<H>);
+            inner.set_wrapper(node.clone());
+        }
 
         node
     }
@@ -596,3 +612,92 @@ impl<H: EventHandlers> InnerArc for NodeManager<H> {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use std::{env, sync::Arc};
+
+    use futures_util::FutureExt;
+
+    use crate::event::EventHandlers;
+    use crate::node::{NodeInfo, Node, NodeConfig};
+    use crate::utils::InnerArc;
+
+    #[derive(Clone)]
+    struct HandlersMock;
+
+    impl EventHandlers for HandlersMock {
+        fn on_track_start(
+                &self, _: crate::event::TrackStartEvent
+            ) -> futures_util::future::BoxFuture<'static, ()> {
+            async { }.boxed()
+        }
+
+        fn on_track_end(
+                &self, _: crate::event::TrackEndEvent
+            ) -> futures_util::future::BoxFuture<'static, ()> {
+            async { }.boxed()
+        }
+
+        fn on_track_exception(
+                &self, _: crate::event::TrackExceptionEvent
+            ) -> futures_util::future::BoxFuture<'static, ()> {
+            async { }.boxed()
+        }
+
+        fn on_track_stuck(
+                &self, _: crate::event::TrackStuckEvent
+            ) -> futures_util::future::BoxFuture<'static, ()> {
+            async { }.boxed()
+        }
+
+        fn on_discord_ws_closed<H: EventHandlers>(
+                &self, _: crate::event::DiscordWsClosedEvent<H>
+            ) -> futures_util::future::BoxFuture<'static, ()> {
+            async { }.boxed()
+        }
+
+        fn on_ws_client_error<H: EventHandlers>(
+                &self, _: crate::event::WsClientErrorEvent<H>
+            ) -> futures_util::future::BoxFuture<'static, ()> {
+            async { }.boxed()
+        }
+    }
+
+    fn env_var(name: &str) -> String {
+        match env::var(name) {
+            Ok(val) => val,
+            Err(_) => panic!("invalid environment variable `{name}`"),
+        }
+    }
+
+    fn new_node_info() -> NodeInfo<HandlersMock> {
+        let config = NodeConfig {
+            name: "".to_string(),
+            host: env_var("HOST"),
+            port: env_var("PORT").parse::<u16>().expect("invalid valid port"),
+            secure: false,
+            password: "".to_string(),
+        };
+
+        NodeInfo {
+            bot_user_id: env_var("BOT_USER_ID"),
+            password: env_var("PASSWORD"),
+            ws_url: config.ws().expect("invalid web socket url"),
+            rest_url: config.rest().expect("invalid web socket url"),
+            handlers: Arc::new(HandlersMock),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_web_socket_connect_and_close() {
+        let node_info = new_node_info();
+        let node = Node::new(node_info);
+
+        let result = node.instance().connect().await;
+        assert!(result.is_ok(), "got error from connect method: {}", result.unwrap_err());
+        assert!(!result.unwrap(), "received true");
+
+        let result = node.instance().close().await;
+        assert!(result.is_ok(), "got error from close method: {}", result.unwrap_err());
+    }
+}
