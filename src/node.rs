@@ -41,7 +41,6 @@ pub type BotId = String;
 /// Node unique identifier.
 type NodeName = String;
 
-const CLIENT_HOST: &str = "rusty-lava";
 const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 
 /// Connection config used at node registration.
@@ -321,7 +320,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
         let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
             // Web Socket base headers according to RFC 6455.
-            .header("Host", CLIENT_HOST)
+            .header("Host", self.config.ws_url.host_str().unwrap())
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .header("Sec-WebSocket-Key", generate_key())
