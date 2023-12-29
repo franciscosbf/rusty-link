@@ -14,10 +14,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite::{
-    protocol::Message,
-    handshake::client::generate_key
-};
+use tokio_tungstenite::tungstenite;
+use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::error::RustyError;
 use crate::event::{
@@ -323,7 +321,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
             .header("Host", self.config.ws_url.host_str().unwrap())
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
-            .header("Sec-WebSocket-Key", generate_key())
+            .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
             .header("Sec-WebSocket-Version", "13")
             // Lavalink required headers.
             .header("User-Id", self.config.bot_user_id.as_str())
