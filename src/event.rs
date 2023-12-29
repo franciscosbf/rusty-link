@@ -122,7 +122,7 @@ pub struct WsClientErrorEvent {
 /// }
 /// ```
 #[async_trait]
-pub trait EventHandlers: Send + Sync + 'static {
+pub trait EventHandlers: Send + Sync {
     /// Receives the next [`TrackStartEvent`].
     async fn on_track_start(&self, event: TrackStartEvent);
 
