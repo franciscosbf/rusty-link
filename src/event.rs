@@ -2,6 +2,7 @@
 
 #![allow(dead_code)] // TODO: remove this.
 
+use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 
 use crate::node::Node;
@@ -52,9 +53,9 @@ pub struct TrackStuckEvent {
 }
 
 /// Dispatched when the websocket audio connection to Discord is closed.
-pub struct DiscordWsClosedEvent<H: EventHandlers> {
+pub struct DiscordWsClosedEvent {
     /// Node where the web socket was closed.
-    pub node: Node<H>,
+    pub node: Node,
     /// The player associated to the closed connection.
     pub player: Player,
     /// Explanation on why the audio web socket was closed.
@@ -64,9 +65,9 @@ pub struct DiscordWsClosedEvent<H: EventHandlers> {
 /// Special event used to report errors on receiving/parsing messages from the
 /// web socket of a node.
 #[allow(missing_docs)]
-pub struct WsClientErrorEvent<H: EventHandlers> {
+pub struct WsClientErrorEvent {
     /// Node where the web socket got an error.
-    pub node: Node<H>,
+    pub node: Node,
     pub error: Box<RustyError>,
 }
 
@@ -77,8 +78,7 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// them.
 ///
 /// If the implementation of `EventHandlers` is composed of some other types,
-/// then they must implement `Send` and `Sync` as well. Besides that, it must
-/// at least derive Close (i.e. `#derive(Clone)`).
+/// then they must implement `Send` and `Sync` as well.
 ///
 /// # Event Handlers Scheduling
 ///
@@ -97,89 +97,47 @@ pub struct WsClientErrorEvent<H: EventHandlers> {
 /// ```
 /// # use std::sync::Arc;
 /// # use rusty_link::event::*;
-/// // FutureExt trait extension is necessary so the `boxed` method can be used.
-/// use futures_util::future::{BoxFuture, FutureExt};
+/// use rusty_link::async_trait;
 ///
 /// # struct BotState;
 /// # impl BotState {
 /// #     async fn register_started_track(&self, _ :TrackStartEvent) { }
 /// # }
-/// #[derive(Clone)]
 /// struct Handlers {
 ///     bot_state: Arc<BotState>,
 /// }
 ///
+/// #[async_trait]
 /// impl EventHandlers for Handlers {
-///     fn on_track_start(
-///         &self, event: TrackStartEvent
-///     ) -> BoxFuture<'static, ()> {
-///         let state = self.bot_state.clone();
-///
-///         async move {
-///             state.register_started_track(event).await;
-///         }.boxed()
+///     async fn on_track_start(&self, event: TrackStartEvent) {
+///         self.bot_state.register_started_track(event).await;
 ///     }
 ///
 ///     // The same goes for the reamining handlers...
-///     # fn on_track_end(
-///     #     &self, _: TrackEndEvent
-///     # ) -> BoxFuture<'static, ()> {
-///     #     async { }.boxed()
-///     # }
-///     #
-///     # fn on_track_exception(
-///     #     &self, _: TrackExceptionEvent
-///     # ) -> BoxFuture<'static, ()> {
-///     #     async { }.boxed()
-///     # }
-///     #
-///     # fn on_track_stuck(
-///     #     &self, _: TrackStuckEvent
-///     # ) -> BoxFuture<'static, ()> {
-///     #     async { }.boxed()
-///     # }
-///     #
-///     # fn on_discord_ws_closed<H: EventHandlers>(
-///     #     &self, _: DiscordWsClosedEvent<H>
-///     # ) -> BoxFuture<'static, ()> {
-///     #     async { }.boxed()
-///     # }
-///     #
-///     # fn on_ws_client_error<H: EventHandlers>(
-///     #     &self, _: WsClientErrorEvent<H>
-///     # ) -> BoxFuture<'static, ()> {
-///     #     async { }.boxed()
-///     # }
+///     # async fn on_track_end(&self, _: TrackEndEvent) { }
+///     # async fn on_track_exception(&self, _: TrackExceptionEvent) { }
+///     # async fn on_track_stuck(&self, _: TrackStuckEvent) { }
+///     # async fn on_discord_ws_closed(&self, _: DiscordWsClosedEvent) { }
+///     # async fn on_ws_client_error(&self, _: WsClientErrorEvent) { }
 /// }
 /// ```
-pub trait EventHandlers: Clone + Send + Sync + 'static {
+#[async_trait]
+pub trait EventHandlers: Send + Sync + 'static {
     /// Receives the next [`TrackStartEvent`].
-    fn on_track_start(
-        &self, event: TrackStartEvent
-    ) -> BoxFuture<'static, ()>;
+    async fn on_track_start(&self, event: TrackStartEvent);
 
     /// Receives the next [`TrackEndEvent`].
-    fn on_track_end(
-        &self, event: TrackEndEvent
-    ) -> BoxFuture<'static, ()>;
+    async fn on_track_end(&self, event: TrackEndEvent);
 
     /// Receives the next [`TrackExceptionEvent`].
-    fn on_track_exception(
-        &self, event: TrackExceptionEvent
-    ) -> BoxFuture<'static, ()>;
+    async fn on_track_exception(&self, event: TrackExceptionEvent);
 
     /// Receives the next [`TrackStuckEvent`].
-    fn on_track_stuck(
-        &self, event: TrackStuckEvent
-    ) -> BoxFuture<'static, ()>;
+    async fn on_track_stuck(&self, event: TrackStuckEvent);
 
     /// Receives the next [`DiscordWsClosedEvent`].
-    fn on_discord_ws_closed<H: EventHandlers>(
-        &self, event: DiscordWsClosedEvent<H>
-    ) -> BoxFuture<'static, ()>;
+    async fn on_discord_ws_closed(&self, event: DiscordWsClosedEvent);
 
     /// Receives the next [`WsClientErrorEvent`].
-    fn on_ws_client_error<H: EventHandlers>(
-        &self, event: WsClientErrorEvent<H>
-    ) -> BoxFuture<'static, ()>;
+    async fn on_ws_client_error(&self, event: WsClientErrorEvent);
 }

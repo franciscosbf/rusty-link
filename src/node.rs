@@ -14,8 +14,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite;
-use tokio_tungstenite::tungstenite::protocol::Message;
+use tokio_tungstenite::tungstenite::{self, protocol::Message};
 
 use crate::error::RustyError;
 use crate::event::{
@@ -106,12 +105,12 @@ impl WebSocketReader {
 }
 
 /// General data that can be accessed by all node operations.
-struct NodeInfo<H: EventHandlers> {
+struct NodeInternals {
     bot_user_id: BotId,
     password: String,
     ws_url: Url,
     rest_url: Url,
-    handlers: Arc<H>,
+    handlers: Arc<dyn EventHandlers>,
 }
 
 /// Simple marker to indicate where are the new node stats update comming from.
@@ -217,19 +216,19 @@ impl WsConn {
 }
 
 /// TODO:
-pub struct NodeRef<H: EventHandlers> {
-    node: Option<Node<H>>,
-    config: NodeInfo<H>,
+pub struct NodeRef {
+    node: Option<Node>,
+    config: NodeInternals,
     state: Arc<NodeState>,
     client: reqwest::Client,
     ws_conn: Arc<RwLock<WsConn>>,
 }
 
 /// Dispatches an event and awaits for its execution.
-async fn process_event<H: EventHandlers>(
+async fn process_event(
     event_type: EventType,
-    handlers: Arc<H>,
-    node: Node<H>,
+    handlers: Arc<dyn EventHandlers>,
+    node: Node,
     player: Player,
 ) {
     match event_type {
@@ -261,8 +260,8 @@ async fn process_event<H: EventHandlers>(
     };
 }
 
-impl<H: EventHandlers + Clone> NodeRef<H> {
-    fn new(config: NodeInfo<H>) -> Self {
+impl NodeRef {
+    fn new(config: NodeInternals) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
         rest_headers.insert(
@@ -283,7 +282,7 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
     }
 
     /// Stores a reference to its wrapper.
-    fn set_wrapper(&mut self, node: Node<H>) {
+    fn set_wrapper(&mut self, node: Node) {
         self.node.replace(node);
     }
 
@@ -490,17 +489,17 @@ impl<H: EventHandlers + Clone> NodeRef<H> {
 
 /// TODO:
 #[derive(Clone)]
-pub struct Node<H: EventHandlers> {
-    inner: Arc<NodeRef<H>>,
+pub struct Node {
+    inner: Arc<NodeRef>,
 }
 
-impl<H: EventHandlers + Clone> Node<H> {
-    fn new(config: NodeInfo<H>) -> Self {
+impl Node {
+    fn new(config: NodeInternals) -> Self {
         let node = Self { inner: Arc::new(NodeRef::new(config)) };
 
         // Stores a cloned reference of node in the inner instance.
         unsafe {
-            let inner = &mut *(Arc::as_ptr(&node.inner) as *mut NodeRef<H>);
+            let inner = &mut *(Arc::as_ptr(&node.inner) as *mut NodeRef);
             inner.set_wrapper(node.clone());
         }
 
@@ -508,8 +507,8 @@ impl<H: EventHandlers + Clone> Node<H> {
     }
 }
 
-impl<H: EventHandlers> InnerArc for Node<H> {
-    type Ref = NodeRef<H>;
+impl InnerArc for Node {
+    type Ref = NodeRef;
 
     fn instance(&self) -> &Arc<Self::Ref> {
         &self.inner
@@ -520,7 +519,7 @@ impl<H: EventHandlers> InnerArc for Node<H> {
 pub struct NodeManagerRef<H: EventHandlers> {
     bot_user_id: BotId,
     handlers: Arc<H>,
-    nodes: RwLock<HashMap<NodeName, Node<H>>>,
+    nodes: RwLock<HashMap<NodeName, Node>>,
     players: RwLock<HashMap<GuildId, Player>>,
 }
 
@@ -533,7 +532,7 @@ impl<H: EventHandlers> NodeManagerRef<H> {
         }
     }
 
-    async fn select_node(&self) -> Result<Node<H>, RustyError> {
+    async fn select_node(&self) -> Result<Node, RustyError> {
         todo!()
     }
 
@@ -553,7 +552,7 @@ impl<H: EventHandlers> NodeManagerRef<H> {
     pub async fn get_node(
         &self,
         name: NodeName,
-    ) -> Result<Node<H>, RustyError> {
+    ) -> Result<Node, RustyError> {
         todo!()
     }
 
@@ -613,51 +612,21 @@ impl<H: EventHandlers> InnerArc for NodeManager<H> {
 mod test {
     use std::{env, sync::Arc};
 
-    use futures_util::FutureExt;
-
-    use crate::event::EventHandlers;
-    use crate::node::{NodeInfo, Node, NodeConfig};
+    use crate::async_trait;
+    use crate::node::{NodeInternals, Node, NodeConfig};
     use crate::utils::InnerArc;
+    use crate::event::*;
 
-    #[derive(Clone)]
     struct HandlersMock;
 
+    #[async_trait]
     impl EventHandlers for HandlersMock {
-        fn on_track_start(
-                &self, _: crate::event::TrackStartEvent
-            ) -> futures_util::future::BoxFuture<'static, ()> {
-            async { }.boxed()
-        }
-
-        fn on_track_end(
-                &self, _: crate::event::TrackEndEvent
-            ) -> futures_util::future::BoxFuture<'static, ()> {
-            async { }.boxed()
-        }
-
-        fn on_track_exception(
-                &self, _: crate::event::TrackExceptionEvent
-            ) -> futures_util::future::BoxFuture<'static, ()> {
-            async { }.boxed()
-        }
-
-        fn on_track_stuck(
-                &self, _: crate::event::TrackStuckEvent
-            ) -> futures_util::future::BoxFuture<'static, ()> {
-            async { }.boxed()
-        }
-
-        fn on_discord_ws_closed<H: EventHandlers>(
-                &self, _: crate::event::DiscordWsClosedEvent<H>
-            ) -> futures_util::future::BoxFuture<'static, ()> {
-            async { }.boxed()
-        }
-
-        fn on_ws_client_error<H: EventHandlers>(
-                &self, _: crate::event::WsClientErrorEvent<H>
-            ) -> futures_util::future::BoxFuture<'static, ()> {
-            async { }.boxed()
-        }
+        async fn on_track_start(&self, _: TrackStartEvent) { }
+        async fn on_track_end(&self, _: TrackEndEvent) { }
+        async fn on_track_exception(&self, _: TrackExceptionEvent) { }
+        async fn on_track_stuck(&self, _: TrackStuckEvent) { }
+        async fn on_discord_ws_closed(&self, _: DiscordWsClosedEvent) { }
+        async fn on_ws_client_error(&self, _: WsClientErrorEvent) { }
     }
 
     fn env_var(name: &str) -> String {
@@ -667,7 +636,7 @@ mod test {
         }
     }
 
-    fn new_node_info() -> NodeInfo<HandlersMock> {
+    fn new_node_info() -> NodeInternals {
         let config = NodeConfig {
             name: "".to_string(),
             host: env_var("HOST"),
@@ -676,7 +645,7 @@ mod test {
             password: "".to_string(),
         };
 
-        NodeInfo {
+        NodeInternals {
             bot_user_id: env_var("BOT_USER_ID"),
             password: env_var("PASSWORD"),
             ws_url: config.ws().expect("invalid web socket url"),
