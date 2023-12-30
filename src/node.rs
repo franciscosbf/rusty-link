@@ -72,16 +72,27 @@ impl NodeConfig {
     }
 }
 
+/// Describes the action that must be taken on each WebSocketReader::process_next call.
+enum MsgAction {
+    /// Text data of the new message to be processed.
+    Process(String),
+    /// All that's not Message::{Text, Close} is marked as ignored,
+    Ignore,
+    /// There's no more messages.
+    Finalize,
+}
+
 struct WebSocketReader {
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
 }
 
 impl WebSocketReader {
     /// Returns the next text message content if any.
-    async fn process_next(&mut self) -> Result<Option<String>, RustyError> {
+    async fn process_next(&mut self) -> Result<MsgAction, RustyError> {
+        // Waits for the next message.
         let item = match self.stream.next().await {
             Some(item) => item,
-            None => return Ok(None),
+            None => return Ok(MsgAction::Finalize),
         };
 
         let message = match item {
@@ -90,9 +101,9 @@ impl WebSocketReader {
         };
 
         match message {
-            Message::Text(data) => Ok(Some(data)),
+            Message::Text(data) => Ok(MsgAction::Process(data)),
             Message::Close(_) => Err(RustyError::ImmediateWebSocketClose),
-            _ => Ok(None), // Ignore other types of message.
+            _ => Ok(MsgAction::Ignore),
         }
     }
 
@@ -113,12 +124,10 @@ struct NodeInternals {
     handlers: Arc<dyn EventHandlers>,
 }
 
-/// Simple marker to indicate where are the new node stats update comming from.
-enum StatsUpKind {
+/// Indicate where the node stats update is comming from.
+enum StatsUpdater {
     WebSocket, Endpoint
 }
-
-use self::StatsUpKind::*;
 
 struct NodeState {
     players: RwLock<HashMap<GuildId, Player>>,
@@ -151,7 +160,7 @@ impl NodeState {
     /// of it.
     ///
     /// [FrameStats]: crate::model::FrameStats
-    async fn maybe_update_stats(&self, new: &mut NodeStats, kind: StatsUpKind) {
+    async fn maybe_update_stats(&self, new: &mut NodeStats, kind: StatsUpdater) {
         let mut stats = self.stats.write().await;
 
         if stats.is_none() {
@@ -161,7 +170,7 @@ impl NodeState {
 
         let stats_ref = stats.as_ref().unwrap();
         if stats_ref.uptime < new.uptime {
-            if matches!(kind, Endpoint) && stats_ref.frame_stats.is_some() {
+            if matches!(kind, StatsUpdater::Endpoint) && stats_ref.frame_stats.is_some() {
                 // Preserve frame stats.
                 new.frame_stats = stats_ref.frame_stats;
                 // WARN: can I improve this by changing how NodeStats is parsed?
@@ -290,7 +299,7 @@ impl NodeRef {
         let mut stats = process_request(request).await?;
 
         // Tries to update the current uptime.
-        self.state.maybe_update_stats(&mut stats, StatsUpKind::Endpoint).await;
+        self.state.maybe_update_stats(&mut stats, StatsUpdater::Endpoint).await;
 
         Ok(stats)
     }
@@ -337,17 +346,23 @@ impl NodeRef {
         // the first operation (aka ready op).
         let (stream, _) = match tokio_tungstenite::connect_async(request).await {
             Ok(content) => content,
-            Err(e) => {
-                return Err(RustyError::WebSocketError(e));
-            }
+            Err(e) => return Err(RustyError::WebSocketError(e)),
         };
 
         let mut ws_reader = WebSocketReader { stream };
 
         // Awaits for ready operation and parses it.
         let raw = match ws_reader.process_next().await? {
-            Some(raw) => raw,
-            None => return Err(RustyError::MissingReadyMessage),
+            MsgAction::Process(raw) => raw,
+            action => {
+                // Due to safety purposes, we check if the received message has an unexpected type
+                // and if so the connection is closed before exiting.
+                if let MsgAction::Ignore = action {
+                    let _ = ws_reader.close().await;
+                }
+
+                return Err(RustyError::MissingReadyMessage);
+            }
         };
         let resumed = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
             Ok(ready_op) => {
@@ -378,8 +393,9 @@ impl NodeRef {
                     }
                     result = ws_reader.process_next() => {
                         let raw = match result {
-                            Ok(Some(contained_raw)) => contained_raw,
-                            Ok(None) => break, // Terminates execution.
+                            Ok(MsgAction::Process(contained_raw)) => contained_raw,
+                            Ok(MsgAction::Finalize) => break, // Terminates execution.
+                            Ok(MsgAction::Ignore) => continue, // Unrecognized messages are ignored.
                             Err(e) => {
                                 let chandlers = handlers.clone();
                                 let event = WsClientErrorEvent {
@@ -426,7 +442,7 @@ impl NodeRef {
                             }
                             OpType::Stats(mut op) =>
                                 state.maybe_update_stats(
-                                    &mut op.stats, StatsUpKind::WebSocket
+                                    &mut op.stats, StatsUpdater::WebSocket
                                 ).await,
                             OpType::Event(op) => {
                                 let players = state.players.read().await;
