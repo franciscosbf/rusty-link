@@ -154,7 +154,7 @@ impl NodeState {
 
     /// Update stats if the uptime of `new` is greater than the current one.
     ///
-    /// If `kind` is [`Endpoint`], preserves the [FrameStats] if present.
+    /// If `kind` is [`StatsUpdater::Endpoint`], preserves the [FrameStats] if present.
     ///
     /// If the current state contains frame stats, then `new` will have a copy
     /// of it.
