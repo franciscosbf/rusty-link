@@ -312,7 +312,7 @@ impl NodeRef {
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
             .uri(self.config.ws_url.as_str())
-            // Web Socket base headers according to RFC 6455.
+            // Web Socket base headers as per RFC 6455.
             .header("Host", self.config.ws_url.host_str().unwrap())
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
