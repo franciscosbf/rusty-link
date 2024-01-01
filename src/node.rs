@@ -2,21 +2,17 @@
 
 #![allow(dead_code)] // TODO: remove this.
 
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use hashbrown::HashMap;
-use tokio::{
-    net::TcpStream,
-    task::JoinHandle,
-    sync::{oneshot, RwLock}
-};
+use tokio::{net::TcpStream, task::JoinHandle, sync::{oneshot, RwLock, RwLockWriteGuard}};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 use futures_util::StreamExt;
 use tokio_tungstenite::tungstenite::{self, protocol::Message};
 
-use crate::error::RustyError;
+use crate::{error::RustyError, model::{CurrentSessionState, Secs}};
 use crate::event::{
     EventHandlers,
     WsClientErrorEvent,
@@ -26,7 +22,7 @@ use crate::event::{
     TrackExceptionEvent,
     TrackStuckEvent
 };
-use crate::model::NodeStats;
+use crate::model::{NodeStats, NewSessionState};
 use crate::op::{ReadyOp, OpType, EventType};
 use crate::player::Player;
 use crate::utils::{InnerArc, process_request};
@@ -52,9 +48,7 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
-    fn parse_url(
-        &self, base: &str, path: &str
-    ) -> Result<Url, url::ParseError> {
+    fn parse_url(&self, base: &str, path: &str) -> Result<Url, url::ParseError> {
         let raw = format!(
             "{}{}://{}:{}/v4{}", base,
             if self.secure { "s" } else { "" },
@@ -64,7 +58,7 @@ impl NodeConfig {
     }
 
     fn rest(&self) -> Result<Url, url::ParseError> {
-        self.parse_url("http", "")
+        self.parse_url("http", "/")
     }
 
     fn ws(&self) -> Result<Url, url::ParseError> {
@@ -130,13 +124,29 @@ enum StatsUpdater {
 }
 
 struct NodeState {
+    connected: AtomicBool,
     players: RwLock<HashMap<GuildId, Player>>,
     stats: RwLock<Option<NodeStats>>,
 }
 
 impl NodeState {
+    fn connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
+    }
+
+    fn mark_connected(&self) {
+        self.connected.store(true, Ordering::Release)
+    }
+
+    fn mark_disconnected(&self) {
+        self.connected.store(false, Ordering::Release)
+    }
+}
+
+impl NodeState {
     fn new() -> Self {
         Self {
+            connected: AtomicBool::new(false),
             players: RwLock::new(HashMap::new()),
             stats: RwLock::new(None),
         }
@@ -181,13 +191,25 @@ impl NodeState {
 }
 
 struct NodeSession {
-    keep: bool,
-    last: Option<String>,
+    preserve: bool,
+    id: String,
 }
 
 impl NodeSession {
-    fn new() -> Self {
-        Self { keep: false, last: None }
+    fn new(id: String) -> Self {
+        Self { preserve: false, id }
+    }
+
+    fn id(&self) -> &str {
+        self.id.as_str()
+    }
+
+    fn keep(&mut self) {
+        self.preserve = true;
+    }
+
+    fn reset(&mut self) {
+        self.preserve = false;
     }
 }
 
@@ -213,14 +235,25 @@ impl WsAlerter {
 }
 
 struct WsConn {
-    session: NodeSession,
+    // May contain the last or current active session, if any.
+    session: Option<NodeSession>,
     /// Refers to the current active session, if any.
     alerter: Option<WsAlerter>,
 }
 
 impl WsConn {
     fn new() -> Self {
-        Self { session: NodeSession::new(), alerter: None }
+        Self { session: None, alerter: None }
+    }
+
+    /// Assumes that there's a session.
+    fn session(&self) -> &NodeSession {
+        self.session.as_ref().unwrap()
+    }
+
+    /// Assumes that there's a session.
+    fn session_mut(&mut self) -> &mut NodeSession {
+        self.session.as_mut().unwrap()
     }
 }
 
@@ -241,29 +274,29 @@ async fn process_event(
     player: Player,
 ) {
     match event_type {
-        EventType::TrackStart(event) => {
+        EventType::TrackStart(data) => {
             handlers.on_track_start(TrackStartEvent {
-                player, track: event.track,
+                player, track: data.track,
             }).await
         }
-        EventType::TrackEnd(event) => {
+        EventType::TrackEnd(data) => {
             handlers.on_track_end(TrackEndEvent {
-                player, track: event.track, reason: event.reason
+                player, track: data.track, reason: data.reason
             }).await
         }
-        EventType::TrackException(event) => {
+        EventType::TrackException(data) => {
             handlers.on_track_exception(TrackExceptionEvent {
-                player, track: event.track, exception: event.exception
+                player, track: data.track, exception: data.exception
             }).await
         }
-        EventType::TrackStuck(event) => {
+        EventType::TrackStuck(data) => {
             handlers.on_track_stuck(TrackStuckEvent {
-                player, track: event.track, threshold: event.threshold
+                player, track: data.track, threshold: data.threshold
             }).await
         }
-        EventType::WebSocketClosed(description) => {
+        EventType::WebSocketClosed(data) => {
             handlers.on_discord_ws_closed(DiscordWsClosedEvent {
-                node, player, description
+                node, player, description: data
             }).await
         }
     };
@@ -292,6 +325,82 @@ impl NodeRef {
     }
 
     /// TODO:
+    async fn change_session_state(
+        &self, ws_conn: &WsConn, state: NewSessionState
+    ) -> Result<CurrentSessionState, RustyError> {
+        if !self.state.connected() {
+            return Err(RustyError::NotConnected);
+        }
+
+        let session_id = format!("sessions/{}", ws_conn.session().id());
+        let serialized_state = serde_json::to_vec(&state).unwrap();
+
+        let url = self.config.rest_url.join(session_id.as_str()).unwrap();
+        let request = self.client.patch(url).header("Content-Type", "application/json")
+            .body(serialized_state).send();
+
+        process_request(request).await
+    }
+
+    /// TODO:
+    pub async fn preserve_session(&self) -> Result<CurrentSessionState, RustyError> {
+        let mut ws_conn = self.ws_conn.write().await;
+        let state = NewSessionState::keep();
+
+        let current_state = self.change_session_state(&ws_conn, state).await?;
+
+        // Set local state flag.
+        ws_conn.session_mut().keep();
+
+        Ok(current_state)
+    }
+
+    /// TODO:
+    pub async fn preserve_session_with_timeout(
+        &self, timeout: Secs
+    ) -> Result<CurrentSessionState, RustyError> {
+        let mut ws_conn = self.ws_conn.write().await;
+        let state = NewSessionState::keep_with_timeout(timeout);
+
+        let current_state = self.change_session_state(&ws_conn, state).await?;
+
+        // Set local state flag.
+        ws_conn.session_mut().keep();
+
+        Ok(current_state)
+    }
+
+    /// TODO:
+    pub async fn discard_session(&self) -> Result<CurrentSessionState, RustyError> {
+        let mut ws_conn = self.ws_conn.write().await;
+        let state = NewSessionState::reset();
+
+        let current_state = self.change_session_state(&ws_conn, state).await?;
+
+        // Unset local state flag.
+        ws_conn.session_mut().reset();
+
+        Ok(current_state)
+    }
+
+    /// TODO:
+    pub async fn fetch_session_state(&self) -> Result<CurrentSessionState, RustyError> {
+        let ws_conn = self.ws_conn.read().await;
+        let state = NewSessionState::read();
+
+        let current_state = self.change_session_state(&ws_conn, state).await?;
+
+        Ok(current_state)
+    }
+
+    /// TODO:
+    pub async fn session_state_preserved(&self) -> bool {
+        let ws_conn = self.ws_conn.read().await;
+
+        self.state.connected() && ws_conn.session().preserve
+    }
+
+    /// TODO:
     pub async fn fetch_stats(&self) -> Result<NodeStats, RustyError> {
         let url = self.config.rest_url.join("stats").unwrap();
         let request = self.client.get(url).send();
@@ -313,7 +422,7 @@ impl NodeRef {
     pub async fn connect(&self) -> Result<bool, RustyError> {
         let mut ws_conn = self.ws_conn.write().await;
 
-        if ws_conn.alerter.is_some() {
+        if self.state.connected() {
             // Doesn't make sense trying to connect again.
             return Err(RustyError::DuplicatedWebSocketError);
         }
@@ -334,9 +443,11 @@ impl NodeRef {
 
         // Build request based on last session id (if any) and if we want to resume the current
         // local state.
-        if ws_conn.session.keep && ws_conn.session.last.is_some() {
-            let session_id = ws_conn.session.last.as_ref().unwrap();
-            request_builder = request_builder.header("Session-Id", session_id);
+        match ws_conn.session {
+            Some(ref session) if session.preserve =>
+                request_builder = request_builder.header("Session-Id", session.id()),
+            Some(_) => (), // Discard previous session that isn't meant to be preserved.
+            None => (), // Ignored.
         }
         let request = request_builder.body(()).unwrap();
 
@@ -367,7 +478,7 @@ impl NodeRef {
         let resumed = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
             Ok(ready_op) => {
                 // Store current session id.
-                ws_conn.session.last.replace(ready_op.session_id);
+                ws_conn.session.replace(NodeSession::new(ready_op.session_id));
                 ready_op.resumed
             }
             Err(e) =>
@@ -381,14 +492,16 @@ impl NodeRef {
         let cws_conn = Arc::clone(&self.ws_conn);
         let (tx, mut rx) = oneshot::channel();
 
+        self.state.mark_connected();
+
         // Spawn web socket receiver loop.
         let handler = tokio::spawn(async move {
-            let mut close_result = None;
+            let mut normal_close_result = None;
 
             loop {
                 tokio::select! {
                     _ = &mut rx => { // Got notified to close the connection.
-                        close_result = Some(ws_reader.close().await);
+                        normal_close_result = Some(ws_reader.close().await);
                         break
                     }
                     result = ws_reader.process_next() => {
@@ -463,8 +576,10 @@ impl NodeRef {
                 };
             }
 
-            // Reset web socket reader alerter.
-            if close_result.is_none() {
+            state.mark_disconnected();
+
+            // Reset web socket reader alerter on ubnormal exit.
+            if normal_close_result.is_none() {
                 cws_conn.write().await.alerter.take();
             }
 
@@ -472,7 +587,7 @@ impl NodeRef {
             // if the node will keep operating or not.
             state.clear_stats().await;
 
-            close_result.unwrap_or_else(|| Ok(()))
+            normal_close_result.unwrap_or_else(|| Ok(()))
         });
 
         // Set web socket alerter so it can be explicitly closed later.
@@ -481,13 +596,18 @@ impl NodeRef {
         Ok(resumed)
     }
 
+    /// Returns true if there's an active connection with the node.
+    pub fn connected(&self) -> bool {
+        self.state.connected()
+    }
+
     /// If open, closes the web socket connection.
     ///
     /// Returns Ok if on success or there isn't any connection.
     pub async fn close(&self) -> Result<(), RustyError> {
         let mut ws_conn = self.ws_conn.write().await;
 
-        if ws_conn.alerter.is_none() {
+        if self.state.connected() {
             // There's no connection with the node.
             return Ok(());
         }
@@ -664,15 +784,51 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires a lavalink instance"]
     async fn test_web_socket_connect_and_close() {
         let node_info = new_node_info();
         let node = Node::new(node_info);
 
         let result = node.instance().connect().await;
-        assert!(result.is_ok(), "got error from connect method: {}", result.unwrap_err());
+        assert!(result.is_ok(), "error from connect method: {}", result.unwrap_err());
         assert!(!result.unwrap(), "received true");
 
         let result = node.instance().close().await;
-        assert!(result.is_ok(), "got error from close method: {}", result.unwrap_err());
+        assert!(result.is_ok(), "error from close method: {}", result.unwrap_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a lavalink instance"]
+    async fn test_session_state_change() {
+        let node_info = new_node_info();
+        let node = Node::new(node_info);
+
+        let result = node.instance().connect().await;
+        assert!(result.is_ok(), "error from connect method: {}", result.unwrap_err());
+        assert!(!result.unwrap(), "received true");
+
+        let result = node.instance().preserve_session().await;
+        assert!(result.is_ok(), "error from preserve_session: {}", result.unwrap_err());
+        let state = result.unwrap();
+        assert!(state.resuming, "resuming is false after session has been preserved");
+        assert_eq!(state.timeout, 60);
+        assert!(node.instance().session_state_preserved().await, "local session state isn't true after preserving it");
+
+        let result = node.instance().preserve_session_with_timeout(120).await;
+        assert!(result.is_ok(), "error from preserve_session_with_timeout: {}", result.unwrap_err());
+        let state = result.unwrap();
+        assert!(state.resuming, "resuming is false after session has been preserved with timeout");
+        assert_eq!(state.timeout, 120);
+        assert!(node.instance().session_state_preserved().await, "local session state isn't true after preserving it with timeout");
+
+        let result = node.instance().discard_session().await;
+        assert!(result.is_ok(), "error from session_state_preserved: {}", result.unwrap_err());
+        let state = result.unwrap();
+        assert!(!state.resuming, "resuming is true after session has been discarded");
+        assert_eq!(state.timeout, 120);
+        assert!(!node.instance().session_state_preserved().await, "local session state isn't false after discarding");
+
+        let result = node.instance().close().await;
+        assert!(result.is_ok(), "error from close method: {}", result.unwrap_err());
     }
 }
