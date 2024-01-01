@@ -53,6 +53,9 @@ pub enum RustyError {
     /// When the web socket connection is already stablished.
     #[error("there's already a web socket running")]
     DuplicatedWebSocketError,
+    /// There isn't an active connection with the node.
+    #[error("client isn't connected to the node")]
+    NotConnected,
 }
 
 pub use self::RustyError::*;
