@@ -520,30 +520,34 @@ pub struct DiscordAudioWsClosed {
 
 /// To update the node session state.
 #[derive(Serialize, Debug)]
-pub struct SessionState {
+pub(crate) struct NewSessionState {
     /// Whether resuming is enabled for this session or not.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub resuming: Option<bool>,
+    pub(crate) resuming: Option<bool>,
     /// The timeout in seconds (default is 60 seconds).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<Secs>,
+    pub(crate) timeout: Option<Secs>,
 }
 
-impl SessionState {
-    /// Sets resuming only, leaving the other in its current state.
-    pub fn resuming_only(resuming: bool) -> Self {
-        Self {
-            resuming: Some(resuming),
-            timeout: None
-        }
+impl NewSessionState {
+    /// Preserve session state.
+    pub(crate) fn keep() -> Self {
+        Self { resuming: Some(true), timeout: None }
     }
 
-    /// Sets timeout only, leaving the other in its current state.
-    pub fn timeout_only(timeout: Secs) -> Self {
-        Self {
-            resuming: None,
-            timeout: Some(timeout)
-        }
+    /// Don't preserve session state.
+    pub(crate) fn reset() -> Self {
+        Self { resuming: Some(false), timeout: None }
+    }
+
+    /// Sets resuming with a given timeout.
+    pub(crate) fn keep_with_timeout(timeout: Secs) -> Self {
+        Self { resuming: Some(true), timeout: Some(timeout) }
+    }
+
+    /// Used when we pretend to only fetch the current session state.
+    pub(crate) fn read() -> Self {
+        Self { resuming: None, timeout: None }
     }
 }
 
