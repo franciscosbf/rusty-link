@@ -10,10 +10,9 @@ use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::error::RustyError;
-use crate::model::{CurrentSessionState, Secs};
 use crate::socket::{Socket, CurrentStateLock};
 use crate::event::EventHandlers;
-use crate::model::{NodeStats, NewSessionState};
+use crate::model::{CurrentSessionState, Secs, NodeStats, NewSessionState};
 use crate::player::Player;
 use crate::utils::{InnerArc, process_request};
 
