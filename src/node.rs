@@ -55,15 +55,6 @@ impl NodeConfig {
     }
 }
 
-/// General data that can be accessed by all node operations.
-struct NodeInternals {
-    bot_user_id: BotId,
-    password: String,
-    ws_url: Url,
-    rest_url: Url,
-    handlers: Arc<dyn EventHandlers>,
-}
-
 /// Indicate where the node stats update is comming from.
 pub(crate) enum StatsUpdater {
     WebSocket, Endpoint
