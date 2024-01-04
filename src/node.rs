@@ -9,7 +9,9 @@ use tokio::sync::RwLock;
 use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 
-use crate::{error::RustyError, model::{CurrentSessionState, Secs}, socket::{Socket, CurrentStateController, CurrentStateLock}};
+use crate::error::RustyError;
+use crate::model::{CurrentSessionState, Secs};
+use crate::socket::{Socket, CurrentStateLock};
 use crate::event::EventHandlers;
 use crate::model::{NodeStats, NewSessionState};
 use crate::player::Player;
