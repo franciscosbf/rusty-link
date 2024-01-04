@@ -1,6 +1,4 @@
-//! TODO:
-
-#![allow(dead_code)] // TODO: remove this.
+//! Events propagated by the node.
 
 use async_trait::async_trait;
 
@@ -82,12 +80,6 @@ pub struct WsClientErrorEvent {
 ///
 /// Returned event handlers (i.e. boxed futures) aren't run in a deterministic order. It's up to
 /// how the tokio runtime schedules each future.
-///
-/// # Performance Considerations
-///
-/// Most likely each `EventHandlers::on_*` has to do some setup before returning the proper event
-/// handler. Try to minimize the impact of those operations, since the intention of each handler is
-/// to run concurrently as soon as possible.
 ///
 /// # Example
 ///
