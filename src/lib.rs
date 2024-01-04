@@ -9,9 +9,12 @@
 #![warn(missing_docs)]
 #![doc(test(attr(deny(warnings))))]
 
+// Internal modules.
 pub(crate) mod penalty;
 pub(crate) mod op;
+pub(crate) mod socket;
 
+// Public modules.
 pub mod event;
 pub mod utils;
 pub mod cache;
