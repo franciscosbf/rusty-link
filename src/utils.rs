@@ -47,3 +47,11 @@ where
         Err(e) => Err(RustyError::RequestError(e)),
     }
 }
+
+/// Spawns a future.
+pub(crate) fn spawn<F>(future: F)
+where
+    F: Future<Output = ()> + Send + 'static
+{
+    tokio::spawn(future);
+}
