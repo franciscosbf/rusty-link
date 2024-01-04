@@ -3,7 +3,6 @@
 #![allow(dead_code)] // TODO: remove this.
 
 use async_trait::async_trait;
-use futures_util::future::BoxFuture;
 
 use crate::node::Node;
 use crate::error::RustyError;
