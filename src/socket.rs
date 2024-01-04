@@ -25,6 +25,7 @@ use crate::event::{
 use crate::node::{NodeState, Node, StatsUpdater};
 use crate::op::{ReadyOp, OpType, EventType};
 use crate::player::Player;
+use crate::utils::spawn;
 
 const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 
@@ -38,7 +39,7 @@ enum MsgAction {
     Finalize,
 }
 
-async fn process_event(
+fn process_node_event(
     event_type: EventType,
     handlers: Arc<dyn EventHandlers>,
     node: Node,
@@ -46,29 +47,39 @@ async fn process_event(
 ) {
     match event_type {
         EventType::TrackStart(data) => {
-            handlers.on_track_start(TrackStartEvent {
-                player, track: data.track,
-            }).await
+            spawn(async move {
+                handlers.on_track_start(TrackStartEvent {
+                    player, track: data.track,
+                }).await;
+            });
         }
         EventType::TrackEnd(data) => {
-            handlers.on_track_end(TrackEndEvent {
-                player, track: data.track, reason: data.reason
-            }).await
+            spawn(async move {
+                handlers.on_track_end(TrackEndEvent {
+                    player, track: data.track, reason: data.reason
+                }).await;
+            });
         }
         EventType::TrackException(data) => {
-            handlers.on_track_exception(TrackExceptionEvent {
-                player, track: data.track, exception: data.exception
-            }).await
+            spawn(async move {
+                handlers.on_track_exception(TrackExceptionEvent {
+                    player, track: data.track, exception: data.exception
+                }).await;
+            });
         }
         EventType::TrackStuck(data) => {
-            handlers.on_track_stuck(TrackStuckEvent {
-                player, track: data.track, threshold: data.threshold
-            }).await
+            spawn(async move {
+                handlers.on_track_stuck(TrackStuckEvent {
+                    player, track: data.track, threshold: data.threshold
+                }).await;
+            });
         }
         EventType::WebSocketClosed(data) => {
-            handlers.on_discord_ws_closed(DiscordWsClosedEvent {
-                node, player, description: data
-            }).await
+            spawn(async move {
+                handlers.on_discord_ws_closed(DiscordWsClosedEvent {
+                    node, player, description: data
+                }).await;
+            });
         }
     };
 }
@@ -277,7 +288,7 @@ impl Socket {
                                 let event = WsClientErrorEvent {
                                     node: node.clone(), error: Box::new(e),
                                 };
-                                tokio::spawn(async move {
+                                spawn(async move {
                                     chandlers.on_ws_client_error(event).await;
                                 });
                                 break // This kind of error cannot be tolerated.
@@ -296,7 +307,7 @@ impl Socket {
                                         RustyError::ParseSocketMessageError(e)
                                     ),
                                 };
-                                tokio::spawn(async move {
+                                spawn(async move {
                                     chandlers.on_ws_client_error(event).await;
                                 });
                                 continue
@@ -326,9 +337,9 @@ impl Socket {
                                     Some(player) => {
                                         let chandlers = Arc::clone(&handlers);
                                         let cnode = node.clone();
-                                        tokio::spawn(process_event(
+                                        process_node_event(
                                             op.event, chandlers, cnode, player.clone()
-                                        ));
+                                        );
                                     }
                                     None => continue,
                                 }
