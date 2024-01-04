@@ -10,7 +10,7 @@ use url::Url;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::error::RustyError;
-use crate::socket::{Socket, CurrentStateLock};
+use crate::socket::{Socket, SessionIdReader};
 use crate::event::EventHandlers;
 use crate::model::{CurrentSessionState, Secs, NodeStats, NewSessionState};
 use crate::player::Player;
@@ -61,12 +61,8 @@ pub(crate) enum StatsUpdater {
 }
 
 pub(crate) struct NodeState {
-    pub(crate) players: RwLock<HashMap<GuildId, Player>>,
-    pub(crate) stats: RwLock<Option<NodeStats>>,
-}
-
-impl NodeState {
-    // TODO: methods ro fetch player and stats.
+    players: RwLock<HashMap<GuildId, Player>>,
+    stats: RwLock<Option<NodeStats>>,
 }
 
 impl NodeState {
@@ -75,6 +71,17 @@ impl NodeState {
             players: RwLock::new(HashMap::new()),
             stats: RwLock::new(None),
         }
+    }
+
+    /// Returns the player if exists.
+    pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
+        let players = self.players.read().await;
+        Some(players.get(guild_id)?.clone())
+    }
+
+    /// Removes the player if exists.
+    pub(crate) async fn remove_player(&self, guild_id: &str) {
+        self.players.write().await.remove(guild_id);
     }
 
     /// Reset current stats if any.
@@ -156,7 +163,7 @@ impl NodeRef {
 
     /// TODO:
     async fn change_session_state(
-        &self, session_controller: &impl CurrentStateLock, state: NewSessionState
+        &self, session_controller: &impl SessionIdReader, state: NewSessionState
     ) -> Result<CurrentSessionState, RustyError> {
         let session_id = format!("sessions/{}", session_controller.id());
         let serialized_state = serde_json::to_vec(&state).unwrap();

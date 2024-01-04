@@ -191,7 +191,7 @@ impl Session {
     }
 }
 
-pub(crate) trait CurrentStateLock {
+pub(crate) trait SessionIdReader {
     /// Returns the current session id.
     fn id(&self) -> &str;
 }
@@ -199,8 +199,9 @@ pub(crate) trait CurrentStateLock {
 /// Used to change the session state and read the current session id.
 pub(crate) struct CurrentStateController<'a>(RwLockWriteGuard<'a, Session>);
 
-impl<'a> CurrentStateLock for CurrentStateController<'a> {
+impl<'a> SessionIdReader for CurrentStateController<'a> {
     fn id(&self) -> &str {
+        // Assumes that is present.
         self.0.id.as_ref().unwrap()
     }
 }
@@ -226,8 +227,9 @@ impl<'a> CurrentStateController<'a> {
 /// Only allows to read the session id.
 pub(crate) struct CurrentStateReader<'a>(RwLockReadGuard<'a, Session>);
 
-impl<'a> CurrentStateLock for CurrentStateReader<'a> {
+impl<'a> SessionIdReader for CurrentStateReader<'a> {
     fn id(&self) -> &str {
+        // Assumes that is present.
         self.0.id.as_ref().unwrap()
     }
 }
@@ -317,8 +319,7 @@ impl Socket {
                         // Process operation.
                         match op_type {
                             OpType::PlayerUpdate(op) => {
-                                let players = state.players.read().await;
-                                match players.get(op.guild_id) {
+                                match state.get_player(op.guild_id).await {
                                     Some(player) => {
                                         // TODO:
                                         let _ = op;
@@ -332,8 +333,7 @@ impl Socket {
                                     &mut op.stats, StatsUpdater::WebSocket
                                 ).await,
                             OpType::Event(op) => {
-                                let players = state.players.read().await;
-                                match players.get(op.guild_id) {
+                                match state.get_player(op.guild_id).await {
                                     Some(player) => {
                                         let chandlers = Arc::clone(&handlers);
                                         let cnode = node.clone();
