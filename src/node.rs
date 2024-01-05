@@ -13,7 +13,7 @@ use crate::error::RustyError;
 use crate::event::EventHandlers;
 use crate::model::{CurrentSessionState, NewSessionState, NodeStats, Secs};
 use crate::player::Player;
-use crate::socket::{SessionIdReader, Socket};
+use crate::socket::{SessionGuard, Socket};
 use crate::utils::{process_request, InnerArc};
 
 /// Discord guild identifier.
@@ -193,13 +193,13 @@ impl NodeRef {
     }
 
     /// TODO:
-    async fn change_session_state(
+    async fn change_session_state<'a>(
         &self,
-        session_controller: &impl SessionIdReader,
-        state: NewSessionState,
+        session_guard: &SessionGuard<'a>,
+        new_state: NewSessionState,
     ) -> Result<CurrentSessionState, RustyError> {
-        let session_id = format!("sessions/{}", session_controller.id());
-        let serialized_state = serde_json::to_vec(&state).unwrap();
+        let session_id = format!("sessions/{}", session_guard.id());
+        let serialized_state = serde_json::to_vec(&new_state).unwrap();
 
         let url = self.rest.url().join(session_id.as_str()).unwrap();
         let request = self
@@ -215,15 +215,12 @@ impl NodeRef {
 
     /// TODO:
     pub async fn preserve_session(&self) -> Result<CurrentSessionState, RustyError> {
-        let mut session_controller = self.socket.state_controller().await?;
-        let state = NewSessionState::keep();
+        let session_guard = self.socket.lock_session().await?;
+        let new_state = NewSessionState::keep();
 
-        let current_state = self
-            .change_session_state(&session_controller, state)
-            .await?;
+        let current_state = self.change_session_state(&session_guard, new_state).await?;
 
-        // Set local state flag.
-        session_controller.preserve();
+        session_guard.preserve_session();
 
         Ok(current_state)
     }
@@ -233,40 +230,34 @@ impl NodeRef {
         &self,
         timeout: Secs,
     ) -> Result<CurrentSessionState, RustyError> {
-        let mut session_controller = self.socket.state_controller().await?;
-        let state = NewSessionState::keep_with_timeout(timeout);
+        let session_guard = self.socket.lock_session().await?;
+        let new_state = NewSessionState::keep_with_timeout(timeout);
 
-        let current_state = self
-            .change_session_state(&session_controller, state)
-            .await?;
+        let current_state = self.change_session_state(&session_guard, new_state).await?;
 
-        session_controller.preserve();
+        session_guard.preserve_session();
 
         Ok(current_state)
     }
 
     /// TODO:
     pub async fn discard_session(&self) -> Result<CurrentSessionState, RustyError> {
-        let mut session_controller = self.socket.state_controller().await?;
-        let state = NewSessionState::reset();
+        let session_guard = self.socket.lock_session().await?;
+        let new_state = NewSessionState::reset();
 
-        let current_state = self
-            .change_session_state(&session_controller, state)
-            .await?;
+        let current_state = self.change_session_state(&session_guard, new_state).await?;
 
-        session_controller.discard();
+        session_guard.discard_session();
 
         Ok(current_state)
     }
 
     /// TODO:
     pub async fn fetch_session_state(&self) -> Result<CurrentSessionState, RustyError> {
-        let session_controller = self.socket.state_reader().await?;
-        let state = NewSessionState::read();
+        let session_guard = self.socket.lock_session().await?;
+        let new_state = NewSessionState::read();
 
-        let current_state = self
-            .change_session_state(&session_controller, state)
-            .await?;
+        let current_state = self.change_session_state(&session_guard, new_state).await?;
 
         Ok(current_state)
     }
