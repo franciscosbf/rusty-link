@@ -2,15 +2,26 @@
 
 #![allow(dead_code)] // TODO: remove this.
 
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use crate::node::{GuildId, Node};
-use crate::utils::InnerArc;
 
 /// TODO:
 pub struct PlayerRef {
     guild_id: GuildId,
     node: Node,
+}
+
+impl PlayerRef {
+    /// Returns the guild where the player is running in.
+    pub fn guild_id(&self) -> &GuildId {
+        &self.guild_id
+    }
+
+    /// Returns the associated node.
+    pub fn node(&self) -> &Node {
+        &self.node
+    }
 }
 
 /// Holds the original player so you can use as if it was protected by an [`Arc`] instance.
@@ -28,10 +39,10 @@ impl Player {
     }
 }
 
-impl InnerArc for Player {
-    type Ref = PlayerRef;
+impl Deref for Player {
+    type Target = Arc<PlayerRef>;
 
-    fn instance(&self) -> &Arc<Self::Ref> {
+    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }

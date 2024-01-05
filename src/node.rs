@@ -2,7 +2,7 @@
 
 #![allow(dead_code)] // TODO: remove this.
 
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 
 use hashbrown::HashMap;
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -14,7 +14,7 @@ use crate::event::EventHandlers;
 use crate::model::{CurrentSessionState, NewSessionState, NodeStats, Secs};
 use crate::player::Player;
 use crate::socket::{SessionGuard, Socket};
-use crate::utils::{process_request, InnerArc};
+use crate::utils::{process_request, spawn_fut};
 
 /// Discord guild identifier.
 pub type GuildId = String;
@@ -65,14 +65,14 @@ pub(crate) enum StatsUpdater {
 }
 
 pub(crate) struct NodeState {
-    players: RwLock<HashMap<GuildId, Player>>,
+    players: Arc<RwLock<HashMap<GuildId, Player>>>,
     stats: RwLock<Option<NodeStats>>,
 }
 
 impl NodeState {
     fn new() -> Self {
         Self {
-            players: RwLock::new(HashMap::new()),
+            players: Arc::new(RwLock::new(HashMap::new())),
             stats: RwLock::new(None),
         }
     }
@@ -80,7 +80,17 @@ impl NodeState {
     /// Returns the player if exists.
     pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
         let players = self.players.read().await;
-        Some(players.get(guild_id)?.clone())
+
+        let player = players.get(guild_id)?.clone();
+        if !player.node().connected() {
+            let players = Arc::clone(&self.players);
+            spawn_fut(async move {
+                players.write().await.remove(player.guild_id());
+            });
+            return None;
+        }
+
+        Some(player)
     }
 
     /// Removes the player if exists.
@@ -263,8 +273,8 @@ impl NodeRef {
     }
 
     /// Returns true if the session is preserved or not on future connections.
-    pub async fn preserved_session(&self) -> bool {
-        self.socket.preserved_session().await
+    pub fn preserved_session(&self) -> bool {
+        self.socket.preserved_session()
     }
 
     /// TODO:
@@ -293,8 +303,8 @@ impl NodeRef {
     }
 
     /// Returns true if there's an active web socket connection with the node.
-    pub async fn connected(&self) -> bool {
-        self.socket.connected().await
+    pub fn connected(&self) -> bool {
+        self.socket.connected()
     }
 
     /// If open, closes the web socket connection.
@@ -325,10 +335,10 @@ impl Node {
     }
 }
 
-impl InnerArc for Node {
-    type Ref = NodeRef;
+impl Deref for Node {
+    type Target = Arc<NodeRef>;
 
-    fn instance(&self) -> &Arc<Self::Ref> {
+    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
@@ -412,10 +422,10 @@ impl NodeManager {
     }
 }
 
-impl InnerArc for NodeManager {
-    type Ref = NodeManagerRef;
+impl Deref for NodeManager {
+    type Target = Arc<NodeManagerRef>;
 
-    fn instance(&self) -> &Arc<Self::Ref> {
+    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
@@ -424,9 +434,9 @@ impl InnerArc for NodeManager {
 mod test {
     use std::{env, sync::Arc};
 
+    use crate::async_trait;
     use crate::event::*;
     use crate::node::NodeConfig;
-    use crate::{async_trait, utils::InnerArc};
 
     use super::{Node, NodeRef};
 
@@ -473,9 +483,8 @@ mod test {
     #[ignore = "requires a lavalink instance"]
     async fn test_web_socket_connect_and_close() {
         let node = new_node();
-        let instance = node.instance();
 
-        let result = instance.connect().await;
+        let result = node.connect().await;
         assert!(
             result.is_ok(),
             "error from connect method: {}",
@@ -483,7 +492,7 @@ mod test {
         );
         assert!(!result.unwrap(), "received true");
 
-        let result = instance.close().await;
+        let result = node.close().await;
         assert!(
             result.is_ok(),
             "error from close method: {}",
@@ -495,9 +504,8 @@ mod test {
     #[ignore = "requires a lavalink instance"]
     async fn test_session_state_change() {
         let node = new_node();
-        let instance = node.instance();
 
-        let result = instance.connect().await;
+        let result = node.connect().await;
         assert!(
             result.is_ok(),
             "error from connect method: {}",
@@ -505,7 +513,7 @@ mod test {
         );
         assert!(!result.unwrap(), "received true");
 
-        let result = instance.preserve_session().await;
+        let result = node.preserve_session().await;
         assert!(
             result.is_ok(),
             "error from preserve_session: {}",
@@ -518,11 +526,11 @@ mod test {
         );
         assert_eq!(state.timeout, 60);
         assert!(
-            instance.preserved_session().await,
+            node.preserved_session(),
             "local session state isn't true after preserving it"
         );
 
-        let result = instance.preserve_session_with_timeout(120).await;
+        let result = node.preserve_session_with_timeout(120).await;
         assert!(
             result.is_ok(),
             "error from preserve_session_with_timeout: {}",
@@ -535,11 +543,11 @@ mod test {
         );
         assert_eq!(state.timeout, 120);
         assert!(
-            instance.preserved_session().await,
+            node.preserved_session(),
             "local session state isn't true after preserving it with timeout"
         );
 
-        let result = instance.discard_session().await;
+        let result = node.discard_session().await;
         assert!(
             result.is_ok(),
             "error from session_state_preserved: {}",
@@ -552,11 +560,11 @@ mod test {
         );
         assert_eq!(state.timeout, 120);
         assert!(
-            !instance.preserved_session().await,
+            !node.preserved_session(),
             "local session state isn't false after discarding"
         );
 
-        let result = instance.close().await;
+        let result = node.close().await;
         assert!(
             result.is_ok(),
             "error from close method: {}",
