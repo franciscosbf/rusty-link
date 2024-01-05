@@ -2,6 +2,7 @@
 
 #![allow(dead_code)] // TODO: remove this.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{ops::Deref, sync::Arc};
 
 use hashbrown::HashMap;
@@ -65,6 +66,7 @@ pub(crate) enum StatsUpdater {
 }
 
 pub(crate) struct NodeState {
+    deleted: AtomicBool,
     players: Arc<RwLock<HashMap<GuildId, Player>>>,
     stats: RwLock<Option<NodeStats>>,
 }
@@ -72,25 +74,37 @@ pub(crate) struct NodeState {
 impl NodeState {
     fn new() -> Self {
         Self {
+            deleted: AtomicBool::new(false),
             players: Arc::new(RwLock::new(HashMap::new())),
             stats: RwLock::new(None),
         }
     }
 
-    /// Returns the player if exists.
-    pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
-        let players = self.players.read().await;
+    /// Mark the current channel state as deleted since it might still referred in some player.
+    fn invalidate(&self) {
+        self.deleted.store(true, Ordering::SeqCst);
+    }
 
-        let player = players.get(guild_id)?.clone();
-        if !player.node().connected() {
-            let players = Arc::clone(&self.players);
-            spawn_fut(async move {
-                players.write().await.remove(player.guild_id());
-            });
-            return None;
+    /// Returns true if the node no longer exists.
+    fn invalid(&self) -> bool {
+        self.deleted.load(Ordering::SeqCst)
+    }
+
+    /// Returns the player if its node is connected and the node isn't valid.
+    pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
+        let player = self.players.read().await.get(guild_id)?.clone();
+        let node = player.node();
+
+        if node.state().invalid() {
+            // Removes the player since it became invalid.
+            self.remove_player(guild_id).await;
+        } else if !node.connected() {
+            // Do nothing if the client isn't connected to the node.
+        } else {
+            return Some(player);
         }
 
-        Some(player)
+        None
     }
 
     /// Removes the player if exists.
@@ -190,6 +204,11 @@ impl NodeRef {
             rest,
             socket,
         }
+    }
+
+    /// Returns the node state.
+    pub(crate) fn state(&self) -> Arc<NodeState> {
+        Arc::clone(&self.state)
     }
 
     /// HTTP client and url to perform REST operations.
