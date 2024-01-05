@@ -1,23 +1,9 @@
 //! Generic utilities.
 
-use std::sync::Arc;
-
 use futures_util::Future;
 use serde::de;
 
 use crate::{error::RustyError, model::ApiError};
-
-/// Implemented by structs that don't need to be wrapped by [`Arc`].
-///
-/// Internally, there's a reference that points to the internal implementation,
-/// protected by [`Arc`].
-pub trait InnerArc {
-    /// Ref that points to the actual instance.
-    type Ref;
-
-    /// Returns the inner instance.
-    fn instance(&self) -> &Arc<Self::Ref>;
-}
 
 /// Takes a request, waits for its execution and parses its json body.
 ///
@@ -47,7 +33,7 @@ where
 }
 
 /// Spawns a future.
-pub(crate) fn spawn<F>(future: F)
+pub(crate) fn spawn_fut<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
 {
