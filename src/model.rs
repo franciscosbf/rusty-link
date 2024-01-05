@@ -9,7 +9,7 @@
 
 use std::{collections::HashMap, fmt::Display};
 
-use serde::{Deserialize, Serialize, de};
+use serde::{de, Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 // ############### Types ###############
@@ -27,7 +27,7 @@ pub type Volume = u16;
 /// Player filter volume adjustment.
 pub type FilterVolume = f64;
 /// Unparsed json (i.e. stills in raw format).
-pub type BoxedRawData= Box<RawValue>;
+pub type BoxedRawData = Box<RawValue>;
 /// Plugin identifier.
 pub type PluginName = String;
 /// Discord close event code.
@@ -150,10 +150,7 @@ pub enum LoadResult {
     TracksSearch(Vec<TrackData>),
     /// When there's no match for the given identifier/url.
     #[serde(rename = "empty")]
-    EmptyMatch(
-        #[serde(deserialize_with = "deserialize_empty_match")]
-        ()
-    ),
+    EmptyMatch(#[serde(deserialize_with = "deserialize_empty_match")] ()),
     /// When something went wrong.
     #[serde(rename = "error")]
     Fail(ApiError),
@@ -532,22 +529,34 @@ pub(crate) struct NewSessionState {
 impl NewSessionState {
     /// Preserve session state.
     pub(crate) fn keep() -> Self {
-        Self { resuming: Some(true), timeout: None }
+        Self {
+            resuming: Some(true),
+            timeout: None,
+        }
     }
 
     /// Don't preserve session state.
     pub(crate) fn reset() -> Self {
-        Self { resuming: Some(false), timeout: None }
+        Self {
+            resuming: Some(false),
+            timeout: None,
+        }
     }
 
     /// Sets resuming with a given timeout.
     pub(crate) fn keep_with_timeout(timeout: Secs) -> Self {
-        Self { resuming: Some(true), timeout: Some(timeout) }
+        Self {
+            resuming: Some(true),
+            timeout: Some(timeout),
+        }
     }
 
     /// Used when we pretend to only fetch the current session state.
     pub(crate) fn read() -> Self {
-        Self { resuming: None, timeout: None }
+        Self {
+            resuming: None,
+            timeout: None,
+        }
     }
 }
 
@@ -569,7 +578,7 @@ pub struct CurrentSessionState {
 /// See [`serde_json::from_str`] to know more.
 pub fn parse_arbitrary<'de, T>(data: &'de BoxedRawData) -> Result<T, serde_json::Error>
 where
-    T: serde::Deserialize<'de>
+    T: serde::Deserialize<'de>,
 {
     serde_json::from_str(data.get())
 }
@@ -692,6 +701,9 @@ mod test {
         let res = serde_json::from_str::<LoadResult>(raw);
         assert!(res.is_ok(), "got error: {:?}", res);
 
-        assert!(matches!(res.unwrap(), EmptyMatch(())), "expecting LoadResult::EmptyMatch(())");
+        assert!(
+            matches!(res.unwrap(), EmptyMatch(())),
+            "expecting LoadResult::EmptyMatch(())"
+        );
     }
 }

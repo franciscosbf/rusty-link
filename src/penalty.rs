@@ -2,7 +2,7 @@
 
 use std::num::NonZeroUsize;
 
-use chrono::{Utc, DurationRound, Duration};
+use chrono::{Duration, DurationRound, Utc};
 use lru::LruCache;
 use tokio::sync::RwLock;
 
@@ -12,7 +12,10 @@ type Events = [u64; 4];
 type Timestamp = i64;
 
 pub(crate) enum EventMetric {
-    Stuck, Exception, Failed, Attempt,
+    Stuck,
+    Exception,
+    Failed,
+    Attempt,
 }
 
 use self::EventMetric::*;
@@ -36,8 +39,7 @@ impl NodePenalty {
     /// UTC.
     pub(crate) async fn register_event(&self, event: EventMetric) {
         // Truncates the date in the current minute.
-        let truncated_timestamp = Utc::now().duration_trunc(self.minute)
-            .unwrap().timestamp();
+        let truncated_timestamp = Utc::now().duration_trunc(self.minute).unwrap().timestamp();
 
         let mut cached = self.events.write().await;
 
@@ -75,12 +77,14 @@ impl NodePenalty {
         let attempts = events[Attempt as usize];
         let fails = events[Failed as usize];
 
-        if attempts > 0 && attempts == fails { return u64::MAX; }
+        if attempts > 0 && attempts == fails {
+            return u64::MAX;
+        }
 
         let player_p = stats.playing_players;
 
         let system_load = stats.cpu.system_load;
-        let cpu_p = (1.05_f64).powf(100.*system_load*10.-10.) as u64;
+        let cpu_p = (1.05_f64).powf(100. * system_load * 10. - 10.) as u64;
 
         let mut deficit_frame_p = 0;
         let mut null_frame_p = 0;
@@ -88,23 +92,23 @@ impl NodePenalty {
             let deficit = frame_stats.deficit as f64;
             let nulled = frame_stats.nulled as f64;
 
-            deficit_frame_p = (
-                1.03_f64.powf(500.*(deficit/300.)*600.-600.)
-            ) as u64;
-            null_frame_p = (
-                1.03_f64.powf(500.*(nulled/300.)*600.-600.)
-            ) as u64;
+            deficit_frame_p = (1.03_f64.powf(500. * (deficit / 300.) * 600. - 600.)) as u64;
+            null_frame_p = (1.03_f64.powf(500. * (nulled / 300.) * 600. - 600.)) as u64;
         }
 
         let stucks = events[Stuck as usize];
         let exceptions = events[Exception as usize];
 
-        let track_stuck_p = stucks*100-100;
-        let track_exeptions_p  = exceptions*100-100;
-        let load_failed_p = if fails > 0 { fails/attempts } else { 0 };
+        let track_stuck_p = stucks * 100 - 100;
+        let track_exeptions_p = exceptions * 100 - 100;
+        let load_failed_p = if fails > 0 { fails / attempts } else { 0 };
 
-        player_p+cpu_p+deficit_frame_p+null_frame_p+
-        track_stuck_p+track_exeptions_p+load_failed_p
+        player_p
+            + cpu_p
+            + deficit_frame_p
+            + null_frame_p
+            + track_stuck_p
+            + track_exeptions_p
+            + load_failed_p
     }
 }
-

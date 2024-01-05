@@ -10,20 +10,20 @@
 #![doc(test(attr(deny(warnings))))]
 
 // Internal modules.
-pub(crate) mod penalty;
 pub(crate) mod op;
+pub(crate) mod penalty;
 pub(crate) mod socket;
 
 // Public modules.
-pub mod event;
-pub mod utils;
 pub mod cache;
-pub mod model;
+pub mod error;
+pub mod event;
 pub mod filter;
+pub mod model;
 pub mod node;
 pub mod player;
 pub mod queue;
-pub mod error;
+pub mod utils;
 
 // To implement the event handler.
 pub use async_trait::async_trait;

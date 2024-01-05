@@ -22,9 +22,7 @@ pub trait InnerArc {
 /// Takes a request, waits for its execution and parses its json body.
 ///
 /// If status code isn't between 200 and 299, tries to parse the [`ApiError`],
-pub(crate) async fn process_request<T, R>(
-    request: R,
-) -> Result<T, RustyError>
+pub(crate) async fn process_request<T, R>(request: R) -> Result<T, RustyError>
 where
     T: de::DeserializeOwned,
     R: Future<Output = Result<reqwest::Response, reqwest::Error>>,
@@ -51,7 +49,7 @@ where
 /// Spawns a future.
 pub(crate) fn spawn<F>(future: F)
 where
-    F: Future<Output = ()> + Send + 'static
+    F: Future<Output = ()> + Send + 'static,
 {
     tokio::spawn(future);
 }

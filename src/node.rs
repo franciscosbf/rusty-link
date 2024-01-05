@@ -5,16 +5,16 @@
 use std::sync::Arc;
 
 use hashbrown::HashMap;
+use reqwest::header::{HeaderMap, HeaderValue};
 use tokio::sync::RwLock;
 use url::Url;
-use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::error::RustyError;
-use crate::socket::{Socket, SessionIdReader};
 use crate::event::EventHandlers;
-use crate::model::{CurrentSessionState, Secs, NodeStats, NewSessionState};
+use crate::model::{CurrentSessionState, NewSessionState, NodeStats, Secs};
 use crate::player::Player;
-use crate::utils::{InnerArc, process_request};
+use crate::socket::{SessionIdReader, Socket};
+use crate::utils::{process_request, InnerArc};
 
 /// Discord guild identifier.
 pub type GuildId = String;
@@ -39,9 +39,12 @@ pub struct NodeConfig {
 impl NodeConfig {
     fn parse_url(&self, base: &str, path: &str) -> Result<Url, url::ParseError> {
         let raw = format!(
-            "{}{}://{}:{}/v4{}", base,
+            "{}{}://{}:{}/v4{}",
+            base,
             if self.secure { "s" } else { "" },
-            self.host, self.port, path
+            self.host,
+            self.port,
+            path
         );
         Url::parse(raw.as_str())
     }
@@ -57,7 +60,8 @@ impl NodeConfig {
 
 /// Indicate where the node stats update is comming from.
 pub(crate) enum StatsUpdater {
-    WebSocket, Endpoint
+    WebSocket,
+    Endpoint,
 }
 
 pub(crate) struct NodeState {
@@ -159,17 +163,23 @@ impl NodeRef {
         rest_headers.insert("Authorization", HeaderValue::from_str(&password).unwrap());
 
         // Build REST client.
-        let rest_client = reqwest::Client::builder().default_headers(rest_headers).build()
+        let rest_client = reqwest::Client::builder()
+            .default_headers(rest_headers)
+            .build()
             .expect(""); // TODO: write this msg.
 
         let state = Arc::new(NodeState::new());
-        let rest = Rest { url: rest_url, client: rest_client };
-        let socket = Socket::new(
-            ws_url, bot_user_id, password,
-            handlers, Arc::clone(&state)
-        );
+        let rest = Rest {
+            url: rest_url,
+            client: rest_client,
+        };
+        let socket = Socket::new(ws_url, bot_user_id, password, handlers, Arc::clone(&state));
 
-        Self { state, rest, socket }
+        Self {
+            state,
+            rest,
+            socket,
+        }
     }
 
     /// HTTP client and url to perform REST operations.
@@ -184,14 +194,21 @@ impl NodeRef {
 
     /// TODO:
     async fn change_session_state(
-        &self, session_controller: &impl SessionIdReader, state: NewSessionState
+        &self,
+        session_controller: &impl SessionIdReader,
+        state: NewSessionState,
     ) -> Result<CurrentSessionState, RustyError> {
         let session_id = format!("sessions/{}", session_controller.id());
         let serialized_state = serde_json::to_vec(&state).unwrap();
 
         let url = self.rest.url().join(session_id.as_str()).unwrap();
-        let request = self.rest.client().patch(url).header("Content-Type", "application/json")
-            .body(serialized_state).send();
+        let request = self
+            .rest
+            .client()
+            .patch(url)
+            .header("Content-Type", "application/json")
+            .body(serialized_state)
+            .send();
 
         process_request(request).await
     }
@@ -201,7 +218,9 @@ impl NodeRef {
         let mut session_controller = self.socket.state_controller().await?;
         let state = NewSessionState::keep();
 
-        let current_state = self.change_session_state(&session_controller, state).await?;
+        let current_state = self
+            .change_session_state(&session_controller, state)
+            .await?;
 
         // Set local state flag.
         session_controller.preserve();
@@ -211,12 +230,15 @@ impl NodeRef {
 
     /// TODO:
     pub async fn preserve_session_with_timeout(
-        &self, timeout: Secs
+        &self,
+        timeout: Secs,
     ) -> Result<CurrentSessionState, RustyError> {
         let mut session_controller = self.socket.state_controller().await?;
         let state = NewSessionState::keep_with_timeout(timeout);
 
-        let current_state = self.change_session_state(&session_controller, state).await?;
+        let current_state = self
+            .change_session_state(&session_controller, state)
+            .await?;
 
         session_controller.preserve();
 
@@ -228,7 +250,9 @@ impl NodeRef {
         let mut session_controller = self.socket.state_controller().await?;
         let state = NewSessionState::reset();
 
-        let current_state = self.change_session_state(&session_controller, state).await?;
+        let current_state = self
+            .change_session_state(&session_controller, state)
+            .await?;
 
         session_controller.discard();
 
@@ -240,7 +264,9 @@ impl NodeRef {
         let session_controller = self.socket.state_reader().await?;
         let state = NewSessionState::read();
 
-        let current_state = self.change_session_state(&session_controller, state).await?;
+        let current_state = self
+            .change_session_state(&session_controller, state)
+            .await?;
 
         Ok(current_state)
     }
@@ -258,7 +284,9 @@ impl NodeRef {
         let mut stats = process_request(request).await?;
 
         // Tries to update the current uptime.
-        self.state.maybe_update_stats(&mut stats, StatsUpdater::Endpoint).await;
+        self.state
+            .maybe_update_stats(&mut stats, StatsUpdater::Endpoint)
+            .await;
 
         Ok(stats)
     }
@@ -325,7 +353,8 @@ pub struct NodeManagerRef {
 impl NodeManagerRef {
     fn new(bot_user_id: BotId, handlers: Arc<dyn EventHandlers>) -> Self {
         Self {
-            bot_user_id, handlers,
+            bot_user_id,
+            handlers,
             nodes: RwLock::new(HashMap::new()),
             players: RwLock::new(HashMap::new()),
         }
@@ -340,40 +369,28 @@ impl NodeManagerRef {
     /// # Panics
     ///
     /// TODO: explain panic at reqwest::Client creation...
-    pub async fn add_node(
-        &self,
-        info: NodeConfig
-    ) -> Result<(), RustyError> {
+    pub async fn add_node(&self, info: NodeConfig) -> Result<(), RustyError> {
         todo!()
     }
 
     /// TODO:
-    pub async fn get_node(
-        &self,
-        name: NodeName,
-    ) -> Result<Node, RustyError> {
+    pub async fn get_node(&self, name: NodeName) -> Result<Node, RustyError> {
         todo!()
     }
 
     /// TODO:
-    pub async fn remove_node(
-        name: NodeName
-    ) -> Result<(), RustyError> {
+    pub async fn remove_node(name: NodeName) -> Result<(), RustyError> {
         todo!()
     }
 
     /// TODO:
-    pub async fn get_player(
-        &self, guild: GuildId
-    ) -> Result<Player, RustyError> {
+    pub async fn get_player(&self, guild: GuildId) -> Result<Player, RustyError> {
         // TODO: creates it if not present.
         todo!()
     }
 
     /// TODO:
-    pub async fn remove_player(
-        &self, guild: GuildId
-    ) -> Result<(), RustyError> {
+    pub async fn remove_player(&self, guild: GuildId) -> Result<(), RustyError> {
         todo!()
     }
 
@@ -395,10 +412,12 @@ impl NodeManager {
     /// Creates a NodeManager instance.
     pub fn new<H>(bot_user_id: BotId, handlers: H) -> Self
     where
-        H: EventHandlers + 'static
+        H: EventHandlers + 'static,
     {
         let node_manager = NodeManagerRef::new(bot_user_id, Arc::new(handlers));
-        Self { inner: Arc::new(node_manager) }
+        Self {
+            inner: Arc::new(node_manager),
+        }
     }
 }
 
@@ -414,22 +433,22 @@ impl InnerArc for NodeManager {
 mod test {
     use std::{env, sync::Arc};
 
-    use crate::{async_trait, utils::InnerArc};
-    use crate::node::NodeConfig;
     use crate::event::*;
+    use crate::node::NodeConfig;
+    use crate::{async_trait, utils::InnerArc};
 
-    use super::{NodeRef, Node};
+    use super::{Node, NodeRef};
 
     struct HandlersMock;
 
     #[async_trait]
     impl EventHandlers for HandlersMock {
-        async fn on_track_start(&self, _: TrackStartEvent) { } // TODO:
-        async fn on_track_end(&self, _: TrackEndEvent) { } // TODO:
-        async fn on_track_exception(&self, _: TrackExceptionEvent) { } // TODO:
-        async fn on_track_stuck(&self, _: TrackStuckEvent) { } // TODO:
-        async fn on_discord_ws_closed(&self, _: DiscordWsClosedEvent) { } // TODO:
-        async fn on_ws_client_error(&self, _: WsClientErrorEvent) { } // TODO:
+        async fn on_track_start(&self, _: TrackStartEvent) {} // TODO:
+        async fn on_track_end(&self, _: TrackEndEvent) {} // TODO:
+        async fn on_track_exception(&self, _: TrackExceptionEvent) {} // TODO:
+        async fn on_track_stuck(&self, _: TrackStuckEvent) {} // TODO:
+        async fn on_discord_ws_closed(&self, _: DiscordWsClosedEvent) {} // TODO:
+        async fn on_ws_client_error(&self, _: WsClientErrorEvent) {} // TODO:
     }
 
     fn env_var(name: &str) -> String {
@@ -439,7 +458,7 @@ mod test {
         }
     }
 
-    fn new_node() -> Node{
+    fn new_node() -> Node {
         let config = NodeConfig {
             name: "".to_string(),
             host: env_var("HOST"),
@@ -466,11 +485,19 @@ mod test {
         let instance = node.instance();
 
         let result = instance.connect().await;
-        assert!(result.is_ok(), "error from connect method: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from connect method: {}",
+            result.unwrap_err()
+        );
         assert!(!result.unwrap(), "received true");
 
         let result = instance.close().await;
-        assert!(result.is_ok(), "error from close method: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from close method: {}",
+            result.unwrap_err()
+        );
     }
 
     #[tokio::test]
@@ -480,31 +507,69 @@ mod test {
         let instance = node.instance();
 
         let result = instance.connect().await;
-        assert!(result.is_ok(), "error from connect method: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from connect method: {}",
+            result.unwrap_err()
+        );
         assert!(!result.unwrap(), "received true");
 
         let result = instance.preserve_session().await;
-        assert!(result.is_ok(), "error from preserve_session: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from preserve_session: {}",
+            result.unwrap_err()
+        );
         let state = result.unwrap();
-        assert!(state.resuming, "resuming is false after session has been preserved");
+        assert!(
+            state.resuming,
+            "resuming is false after session has been preserved"
+        );
         assert_eq!(state.timeout, 60);
-        assert!(instance.preserved_session().await, "local session state isn't true after preserving it");
+        assert!(
+            instance.preserved_session().await,
+            "local session state isn't true after preserving it"
+        );
 
         let result = instance.preserve_session_with_timeout(120).await;
-        assert!(result.is_ok(), "error from preserve_session_with_timeout: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from preserve_session_with_timeout: {}",
+            result.unwrap_err()
+        );
         let state = result.unwrap();
-        assert!(state.resuming, "resuming is false after session has been preserved with timeout");
+        assert!(
+            state.resuming,
+            "resuming is false after session has been preserved with timeout"
+        );
         assert_eq!(state.timeout, 120);
-        assert!(instance.preserved_session().await, "local session state isn't true after preserving it with timeout");
+        assert!(
+            instance.preserved_session().await,
+            "local session state isn't true after preserving it with timeout"
+        );
 
         let result = instance.discard_session().await;
-        assert!(result.is_ok(), "error from session_state_preserved: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from session_state_preserved: {}",
+            result.unwrap_err()
+        );
         let state = result.unwrap();
-        assert!(!state.resuming, "resuming is true after session has been discarded");
+        assert!(
+            !state.resuming,
+            "resuming is true after session has been discarded"
+        );
         assert_eq!(state.timeout, 120);
-        assert!(!instance.preserved_session().await, "local session state isn't false after discarding");
+        assert!(
+            !instance.preserved_session().await,
+            "local session state isn't false after discarding"
+        );
 
         let result = instance.close().await;
-        assert!(result.is_ok(), "error from close method: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "error from close method: {}",
+            result.unwrap_err()
+        );
     }
 }

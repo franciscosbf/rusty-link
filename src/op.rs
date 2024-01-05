@@ -5,12 +5,7 @@
 use serde::Deserialize;
 
 use crate::model::{
-    PlayerState,
-    NodeStats,
-    TrackData,
-    TrackEndReason,
-    TrackException,
-    DiscordAudioWsClosed,
+    DiscordAudioWsClosed, NodeStats, PlayerState, TrackData, TrackEndReason, TrackException,
 };
 
 #[derive(Deserialize, Debug)]
@@ -93,4 +88,3 @@ pub(crate) enum OpType<'a> {
     #[serde(rename = "event")]
     Event(EventOp<'a>),
 }
-

@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
+use crate::node::{GuildId, Node};
 use crate::utils::InnerArc;
-use crate::node::{Node, GuildId};
 
 /// TODO:
 pub struct PlayerRef {
@@ -22,7 +22,9 @@ pub struct Player {
 impl Player {
     pub(crate) fn new(guild_id: GuildId, node: Node) -> Self {
         let inner = PlayerRef { guild_id, node };
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
 }
 

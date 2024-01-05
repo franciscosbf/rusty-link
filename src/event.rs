@@ -2,16 +2,10 @@
 
 use async_trait::async_trait;
 
-use crate::node::Node;
 use crate::error::RustyError;
+use crate::model::{DiscordAudioWsClosed, Milli, TrackData, TrackEndReason, TrackException};
+use crate::node::Node;
 use crate::player::Player;
-use crate::model::{
-    TrackData,
-    TrackEndReason,
-    Milli,
-    TrackException,
-    DiscordAudioWsClosed
-};
 
 /// Dispatched when a track starts playing.
 #[allow(missing_docs)]

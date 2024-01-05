@@ -4,26 +4,21 @@
 
 use std::sync::Arc;
 
+use futures_util::StreamExt;
 use tokio::net::TcpStream;
-use tokio::sync::{RwLock, RwLockWriteGuard, RwLockReadGuard};
-use tokio::{task::JoinHandle, sync::oneshot};
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use tokio::{sync::oneshot, task::JoinHandle};
+use tokio_tungstenite::tungstenite::{self, protocol::Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use url::Url;
-use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite::{self, protocol::Message};
 
 use crate::error::RustyError;
 use crate::event::{
-    EventHandlers,
-    WsClientErrorEvent,
-    TrackStartEvent,
-    TrackEndEvent,
-    TrackExceptionEvent,
-    TrackStuckEvent,
-    DiscordWsClosedEvent
+    DiscordWsClosedEvent, EventHandlers, TrackEndEvent, TrackExceptionEvent, TrackStartEvent,
+    TrackStuckEvent, WsClientErrorEvent,
 };
-use crate::node::{NodeState, Node, StatsUpdater};
-use crate::op::{ReadyOp, OpType, EventType};
+use crate::node::{Node, NodeState, StatsUpdater};
+use crate::op::{EventType, OpType, ReadyOp};
 use crate::player::Player;
 use crate::utils::spawn;
 
@@ -48,37 +43,56 @@ fn process_node_event(
     match event_type {
         EventType::TrackStart(data) => {
             spawn(async move {
-                handlers.on_track_start(TrackStartEvent {
-                    player, track: data.track,
-                }).await;
+                handlers
+                    .on_track_start(TrackStartEvent {
+                        player,
+                        track: data.track,
+                    })
+                    .await;
             });
         }
         EventType::TrackEnd(data) => {
             spawn(async move {
-                handlers.on_track_end(TrackEndEvent {
-                    player, track: data.track, reason: data.reason
-                }).await;
+                handlers
+                    .on_track_end(TrackEndEvent {
+                        player,
+                        track: data.track,
+                        reason: data.reason,
+                    })
+                    .await;
             });
         }
         EventType::TrackException(data) => {
             spawn(async move {
-                handlers.on_track_exception(TrackExceptionEvent {
-                    player, track: data.track, exception: data.exception
-                }).await;
+                handlers
+                    .on_track_exception(TrackExceptionEvent {
+                        player,
+                        track: data.track,
+                        exception: data.exception,
+                    })
+                    .await;
             });
         }
         EventType::TrackStuck(data) => {
             spawn(async move {
-                handlers.on_track_stuck(TrackStuckEvent {
-                    player, track: data.track, threshold: data.threshold
-                }).await;
+                handlers
+                    .on_track_stuck(TrackStuckEvent {
+                        player,
+                        track: data.track,
+                        threshold: data.threshold,
+                    })
+                    .await;
             });
         }
         EventType::WebSocketClosed(data) => {
             spawn(async move {
-                handlers.on_discord_ws_closed(DiscordWsClosedEvent {
-                    node, player, description: data
-                }).await;
+                handlers
+                    .on_discord_ws_closed(DiscordWsClosedEvent {
+                        node,
+                        player,
+                        description: data,
+                    })
+                    .await;
             });
         }
     };
@@ -147,8 +161,10 @@ struct Session {
 impl Session {
     fn new() -> Self {
         Self {
-            connected: false, preserved: false,
-            id: None, alerter: None
+            connected: false,
+            preserved: false,
+            id: None,
+            alerter: None,
         }
     }
 
@@ -253,8 +269,13 @@ impl Socket {
         state: Arc<NodeState>,
     ) -> Self {
         Self {
-            url, bot_id, password, handlers, state, node: None,
-            session: Arc::new(RwLock::new(Session::new()))
+            url,
+            bot_id,
+            password,
+            handlers,
+            state,
+            node: None,
+            session: Arc::new(RwLock::new(Session::new())),
         }
     }
 
@@ -386,7 +407,10 @@ impl Socket {
             .header("Host", self.url.host_str().unwrap())
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
-            .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
+            .header(
+                "Sec-WebSocket-Key",
+                tungstenite::handshake::client::generate_key(),
+            )
             .header("Sec-WebSocket-Version", "13")
             // Lavalink required headers.
             .header("User-Id", self.bot_id.as_str())
@@ -396,10 +420,11 @@ impl Socket {
         // Build request based on last session id (if any) and if we want to resume the current
         // local state.
         match session.id {
-            Some(ref id) if session.preserved =>
-                request_builder = request_builder.header("Session-Id", id),
+            Some(ref id) if session.preserved => {
+                request_builder = request_builder.header("Session-Id", id)
+            }
             Some(_) => (), // Discard previous session that isn't meant to be preserved.
-            None => (), // Ignored.
+            None => (),    // Ignored.
         }
         let request = request_builder.body(()).unwrap();
 
@@ -431,8 +456,7 @@ impl Socket {
                 session.id.replace(ready_op.session_id);
                 ready_op.resumed
             }
-            Err(e) =>
-                return Err(RustyError::ParseSocketMessageError(e)),
+            Err(e) => return Err(RustyError::ParseSocketMessageError(e)),
         };
 
         session.mark_as_opened(self.listen(stream));
