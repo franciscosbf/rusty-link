@@ -21,7 +21,7 @@ use crate::event::{
 use crate::node::{Node, NodeState, StatsUpdater};
 use crate::op::{EventType, OpType, ReadyOp};
 use crate::player::Player;
-use crate::utils::spawn;
+use crate::utils::spawn_fut;
 
 const CLIENT_NAME: &str = "rusty-lava/0.1.0";
 
@@ -43,7 +43,7 @@ fn process_node_event(
 ) {
     match event_type {
         EventType::TrackStart(data) => {
-            spawn(async move {
+            spawn_fut(async move {
                 handlers
                     .on_track_start(TrackStartEvent {
                         player,
@@ -53,7 +53,7 @@ fn process_node_event(
             });
         }
         EventType::TrackEnd(data) => {
-            spawn(async move {
+            spawn_fut(async move {
                 handlers
                     .on_track_end(TrackEndEvent {
                         player,
@@ -64,7 +64,7 @@ fn process_node_event(
             });
         }
         EventType::TrackException(data) => {
-            spawn(async move {
+            spawn_fut(async move {
                 handlers
                     .on_track_exception(TrackExceptionEvent {
                         player,
@@ -75,7 +75,7 @@ fn process_node_event(
             });
         }
         EventType::TrackStuck(data) => {
-            spawn(async move {
+            spawn_fut(async move {
                 handlers
                     .on_track_stuck(TrackStuckEvent {
                         player,
@@ -86,7 +86,7 @@ fn process_node_event(
             });
         }
         EventType::WebSocketClosed(data) => {
-            spawn(async move {
+            spawn_fut(async move {
                 handlers
                     .on_discord_ws_closed(DiscordWsClosedEvent {
                         node,
@@ -350,7 +350,7 @@ impl Socket {
                                 let event = WsClientErrorEvent {
                                     node: node.clone(), error: Box::new(e),
                                 };
-                                spawn(async move {
+                                spawn_fut(async move {
                                     chandlers.on_ws_client_error(event).await;
                                 });
                                 break // This kind of error cannot be tolerated.
@@ -369,7 +369,7 @@ impl Socket {
                                         RustyError::ParseSocketMessageError(e)
                                     ),
                                 };
-                                spawn(async move {
+                                spawn_fut(async move {
                                     chandlers.on_ws_client_error(event).await;
                                 });
                                 continue
@@ -426,7 +426,7 @@ impl Socket {
     }
 
     /// Tells if it is connected or not.
-    pub(crate) async fn connected(&self) -> bool {
+    pub(crate) fn connected(&self) -> bool {
         self.session.connected()
     }
 
@@ -509,7 +509,7 @@ impl Socket {
     }
 
     /// Tells if session if tries to keep session or not.
-    pub(crate) async fn preserved_session(&self) -> bool {
+    pub(crate) fn preserved_session(&self) -> bool {
         self.session.preserved()
     }
 
