@@ -84,16 +84,6 @@ impl NodeState {
         self.players.write().await.remove(guild_id);
     }
 
-    /// Reset current stats if any.
-    pub(crate) async fn clear_stats(&self) {
-        self.stats.write().await.take();
-    }
-
-    /// Return last stats update registered.
-    async fn last_stats(&self) -> Option<NodeStats> {
-        self.stats.read().await.as_ref().cloned()
-    }
-
     /// Update stats if the uptime of `new` is greater than the current one.
     ///
     /// If `kind` is [`StatsUpdater::Endpoint`], preserves the [FrameStats] if present.
@@ -120,13 +110,39 @@ impl NodeState {
             stats.replace(*new);
         }
     }
+
+    /// Reset current stats if any.
+    pub(crate) async fn clear_stats(&self) {
+        self.stats.write().await.take();
+    }
+
+    /// Return last stats update registered.
+    async fn last_stats(&self) -> Option<NodeStats> {
+        self.stats.read().await.as_ref().cloned()
+    }
+}
+
+/// Contains a [`reqwest::Client`] to issue HTTP operations in the node REST API.
+pub(crate) struct Rest {
+    url: Url,
+    client: reqwest::Client,
+}
+
+impl Rest {
+    pub(crate) fn url(&self) -> &Url {
+        &self.url
+    }
+
+    /// Returns the HTTP client.
+    pub(crate) fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
 }
 
 /// TODO:
 pub struct NodeRef {
     state: Arc<NodeState>,
-    rest_url: Url,
-    client: reqwest::Client,
+    rest: Rest,
     socket: Socket,
 }
 
@@ -143,17 +159,22 @@ impl NodeRef {
         rest_headers.insert("Authorization", HeaderValue::from_str(&password).unwrap());
 
         // Build REST client.
-        let client = reqwest::Client::builder().default_headers(rest_headers).build()
+        let rest_client = reqwest::Client::builder().default_headers(rest_headers).build()
             .expect(""); // TODO: write this msg.
 
         let state = Arc::new(NodeState::new());
-
+        let rest = Rest { url: rest_url, client: rest_client };
         let socket = Socket::new(
             ws_url, bot_user_id, password,
             handlers, Arc::clone(&state)
         );
 
-        Self { state, rest_url, client, socket }
+        Self { state, rest, socket }
+    }
+
+    /// HTTP client and url to perform REST operations.
+    pub(crate) fn rest(&self) -> &Rest {
+        &self.rest
     }
 
     /// Stores a reference to its wrapper.
@@ -168,8 +189,8 @@ impl NodeRef {
         let session_id = format!("sessions/{}", session_controller.id());
         let serialized_state = serde_json::to_vec(&state).unwrap();
 
-        let url = self.rest_url.join(session_id.as_str()).unwrap();
-        let request = self.client.patch(url).header("Content-Type", "application/json")
+        let url = self.rest.url().join(session_id.as_str()).unwrap();
+        let request = self.rest.client().patch(url).header("Content-Type", "application/json")
             .body(serialized_state).send();
 
         process_request(request).await
@@ -231,8 +252,8 @@ impl NodeRef {
 
     /// TODO:
     pub async fn fetch_stats(&self) -> Result<NodeStats, RustyError> {
-        let url = self.rest_url.join("stats").unwrap();
-        let request = self.client.get(url).send();
+        let url = self.rest.url().join("stats").unwrap();
+        let request = self.rest.client().get(url).send();
 
         let mut stats = process_request(request).await?;
 
@@ -265,8 +286,7 @@ impl NodeRef {
     }
 }
 
-/// Node controller that holds the original reference so you can use as if it was protected by an
-/// [`Arc`] instance.
+/// Holds the original node so you can use as if it was protected by an [`Arc`] instance.
 #[derive(Clone)]
 pub struct Node {
     inner: Arc<NodeRef>,
