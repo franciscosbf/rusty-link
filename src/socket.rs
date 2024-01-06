@@ -170,7 +170,7 @@ struct InternalsGuard<'a>(RwLockWriteGuard<'a, SessionInternals>);
 
 impl<'a> InternalsGuard<'a> {
     fn id(&self) -> Option<&str> {
-        self.0.id.as_ref().map(|id| id.as_str())
+        self.0.id.as_deref()
     }
 
     fn replace_id(&mut self, id: String) {
@@ -524,3 +524,6 @@ impl Socket {
         })
     }
 }
+
+#[cfg(test)]
+mod test {}
