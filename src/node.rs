@@ -15,7 +15,7 @@ use crate::event::EventHandlers;
 use crate::model::{CurrentSessionState, NewSessionState, NodeStats, Secs};
 use crate::player::Player;
 use crate::socket::{SessionGuard, Socket};
-use crate::utils::{process_request, spawn_fut};
+use crate::utils::process_request;
 
 /// Discord guild identifier.
 pub type GuildId = String;
@@ -244,7 +244,7 @@ impl NodeRef {
 
     /// TODO:
     pub async fn preserve_session(&self) -> Result<CurrentSessionState, RustyError> {
-        let session_guard = self.socket.lock_session().await?;
+        let session_guard = self.socket.soft_lock_session().await?;
         let new_state = NewSessionState::keep();
 
         let current_state = self.change_session_state(&session_guard, new_state).await?;
@@ -259,7 +259,7 @@ impl NodeRef {
         &self,
         timeout: Secs,
     ) -> Result<CurrentSessionState, RustyError> {
-        let session_guard = self.socket.lock_session().await?;
+        let session_guard = self.socket.soft_lock_session().await?;
         let new_state = NewSessionState::keep_with_timeout(timeout);
 
         let current_state = self.change_session_state(&session_guard, new_state).await?;
@@ -271,7 +271,7 @@ impl NodeRef {
 
     /// TODO:
     pub async fn discard_session(&self) -> Result<CurrentSessionState, RustyError> {
-        let session_guard = self.socket.lock_session().await?;
+        let session_guard = self.socket.soft_lock_session().await?;
         let new_state = NewSessionState::reset();
 
         let current_state = self.change_session_state(&session_guard, new_state).await?;
@@ -283,7 +283,7 @@ impl NodeRef {
 
     /// TODO:
     pub async fn fetch_session_state(&self) -> Result<CurrentSessionState, RustyError> {
-        let session_guard = self.socket.lock_session().await?;
+        let session_guard = self.socket.soft_lock_session().await?;
         let new_state = NewSessionState::read();
 
         let current_state = self.change_session_state(&session_guard, new_state).await?;

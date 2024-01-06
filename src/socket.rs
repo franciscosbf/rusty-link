@@ -132,12 +132,13 @@ impl Stream {
     }
 }
 
-struct WsAlerter {
+/// Used to communicate with the web socket reader.
+struct Alerter {
     tx: oneshot::Sender<()>,
     handler: JoinHandle<Result<(), RustyError>>,
 }
 
-impl WsAlerter {
+impl Alerter {
     // Notifies web socket reader to close and awaits for its result.
     async fn close(self) -> Result<(), RustyError> {
         // Orders to shutdown, despite of if the handler has already terminated
@@ -152,9 +153,10 @@ impl WsAlerter {
     }
 }
 
+/// Session state with exclusive access on write operations.
 struct SessionInternals {
     id: Option<String>,
-    alerter: Option<WsAlerter>,
+    alerter: Option<Alerter>,
 }
 
 impl SessionInternals {
@@ -166,24 +168,39 @@ impl SessionInternals {
     }
 }
 
-struct InternalsGuard<'a>(RwLockWriteGuard<'a, SessionInternals>);
+/// Wraps a read guard over session internals for shared access so the session id can be safely
+/// read.
+struct SessionViewGuard<'a>(RwLockReadGuard<'a, SessionInternals>);
 
-impl<'a> InternalsGuard<'a> {
-    fn id(&self) -> Option<&str> {
+impl<'a> SessionViewGuard<'a> {
+    fn session_id(&self) -> Option<&str> {
         self.0.id.as_deref()
     }
+}
 
-    fn replace_id(&mut self, id: String) {
-        self.0.id = Some(id);
+/// Wraps a write guard over session internals and a reference to session.
+///
+/// Has the same operations of [`SessionViewGuard`] but lets you mark the session as open with
+/// exclusive access due to write privilege.
+struct SessionChangeGuard<'a> {
+    session_ref: &'a Session,
+    internals_guard: RwLockWriteGuard<'a, SessionInternals>,
+}
+
+impl<'a> SessionChangeGuard<'a> {
+    fn session_id(&self) -> Option<&str> {
+        self.internals_guard.id.as_deref()
     }
 
-    /// Assumes that there's an alerter present.
-    fn take_alerter(&mut self) -> WsAlerter {
-        self.0.alerter.take().unwrap()
-    }
-
-    fn new_alerter(&mut self, alerter: WsAlerter) {
-        self.0.alerter = Some(alerter);
+    /// Marks session as open.
+    ///
+    /// This operation is protected by a write guard of [`SessionInternals`] guard. It's necessary
+    /// to ensure that there isn't any change in the session id and alerter, while trying to open a
+    /// connection with the node.
+    fn mark_as_open(&mut self, id: String, alerter: Alerter) {
+        self.internals_guard.alerter.replace(alerter);
+        self.internals_guard.id = Some(id);
+        self.session_ref.connected.store(true, Ordering::SeqCst);
     }
 }
 
@@ -218,24 +235,13 @@ impl Session {
         self.preserved.store(false, Ordering::SeqCst);
     }
 
-    /// Marks session as opened.
-    async fn mark_as_opened(&self, alerter: WsAlerter) {
-        self.connected.store(true, Ordering::Release);
-        self.internals.write().await.alerter.replace(alerter);
-    }
-
-    /// Discards alerter.
-    async fn mark_as_closed(&self) {
-        self.internals.write().await.alerter.take();
-
-        self.connected.store(false, Ordering::SeqCst);
-    }
-
-    // Signals to close the session if open.
+    /// Tells to close the session if open.
     async fn wait_for_closing(&self) -> Result<(), RustyError> {
         if !self.connected() {
             return Ok(());
         }
+
+        self.connected.store(false, Ordering::SeqCst);
 
         self.internals
             .write()
@@ -246,25 +252,34 @@ impl Session {
             .close()
             .await?;
 
-        self.connected.store(false, Ordering::SeqCst);
-
         Ok(())
     }
 
-    /// Locks the current state as long as the guard isn't dropped.
-    async fn read_lock(&self) -> Result<RwLockReadGuard<'_, SessionInternals>, RustyError> {
-        let session = self.internals.read().await;
-
+    /// Soft lock to read session internals only if connected to the node.
+    async fn session_view_lock(&self) -> Result<SessionViewGuard, RustyError> {
         if !self.connected() {
             return Err(RustyError::NotConnected);
         }
 
-        Ok(session)
+        Ok(SessionViewGuard(self.internals.read().await))
     }
 
-    // Used to manipulate internal state only whitin this module.
-    async fn write_lock(&self) -> RwLockWriteGuard<'_, SessionInternals> {
-        self.internals.write().await
+    /// Gives exclusive access to session internals.
+    ///
+    /// Connection state and session preservation can be manipulated as well.
+    ///
+    /// It allows to change everything, no matter if there's an active connection or not.
+    async fn session_change_lock(&self) -> SessionChangeGuard {
+        SessionChangeGuard {
+            session_ref: self,
+            internals_guard: self.internals.write().await,
+        }
+    }
+
+    /// Set connection state to closed and remove the connection alerter.
+    async fn mark_as_closed(&self) {
+        self.connected.store(false, Ordering::SeqCst);
+        self.internals.write().await.alerter.take();
     }
 }
 
@@ -278,24 +293,24 @@ pub(crate) struct Socket {
     node: Option<Node>,
 }
 
-/// Prevents from changing the current session on some critical operation.
+/// Prevents from changing the current session.
 pub(crate) struct SessionGuard<'a> {
-    session: Arc<Session>,
-    internals_lock: RwLockReadGuard<'a, SessionInternals>,
+    id_guard: SessionViewGuard<'a>,
+    session_ref: Arc<Session>,
 }
 
 impl<'a> SessionGuard<'a> {
     pub(crate) fn id(&self) -> &str {
         // Assumes that is present.
-        self.internals_lock.id.as_ref().unwrap()
+        self.id_guard.session_id().unwrap()
     }
 
     pub(crate) fn preserve_session(&self) {
-        self.session.preserve();
+        self.session_ref.preserve();
     }
 
     pub(crate) fn discard_session(&self) {
-        self.session.discard();
+        self.session_ref.discard();
     }
 }
 
@@ -323,8 +338,8 @@ impl Socket {
         self.node = Some(node);
     }
 
-    // Spawns the web socket receiver loop.
-    fn listen(&self, mut stream: Stream) -> WsAlerter {
+    /// Spawns the web socket receiver loop.
+    fn listen(&self, mut stream: Stream) -> Alerter {
         let node = self.node.as_ref().unwrap().clone();
         let handlers = Arc::clone(&self.handlers);
         let state = Arc::clone(&self.state);
@@ -422,7 +437,7 @@ impl Socket {
             normal_close_result.unwrap_or_else(|| Ok(()))
         });
 
-        WsAlerter { tx, handler }
+        Alerter { tx, handler }
     }
 
     /// Tells if it is connected or not.
@@ -430,14 +445,14 @@ impl Socket {
         self.session.connected()
     }
 
-    // Creates a connection if not open.
+    /// Creates a connection if not open.
     pub(crate) async fn start(&self) -> Result<bool, RustyError> {
-        let mut session_internals = self.session.write_lock().await;
-
         if self.session.connected() {
             // Doesn't make sense trying to connect again.
             return Err(RustyError::DuplicatedWebSocketError);
         }
+
+        let mut session_guard = self.session.session_change_lock().await;
 
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
@@ -458,8 +473,8 @@ impl Socket {
 
         // Build request based on last session id (if any) and if we want to resume the current
         // local state.
-        match session_internals.id {
-            Some(ref id) if self.session.preserved() => {
+        match session_guard.session_id() {
+            Some(id) if self.session.preserved() => {
                 request_builder = request_builder.header("Session-Id", id)
             }
             Some(_) => (), // Discard previous session that isn't meant to be preserved.
@@ -489,18 +504,15 @@ impl Socket {
                 return Err(RustyError::MissingReadyMessage);
             }
         };
-        let resumed = match serde_json::from_str::<ReadyOp>(raw.as_str()) {
+        match serde_json::from_str::<ReadyOp>(raw.as_str()) {
             Ok(ready_op) => {
-                // Store current session id.
-                session_internals.id.replace(ready_op.session_id);
-                ready_op.resumed
+                let session_alerter = self.listen(stream);
+                session_guard.mark_as_open(ready_op.session_id, session_alerter);
+
+                Ok(ready_op.resumed)
             }
-            Err(e) => return Err(RustyError::ParseSocketMessageError(e)),
-        };
-
-        self.session.mark_as_opened(self.listen(stream)).await;
-
-        Ok(resumed)
+            Err(e) => Err(RustyError::ParseSocketMessageError(e)),
+        }
     }
 
     /// Closes the connection if open.
@@ -513,17 +525,14 @@ impl Socket {
         self.session.preserved()
     }
 
-    /// Returns a session state locker, if connected.
+    /// Returns a non-exclusive session guard, if connection is open.
     ///
-    /// This ensures that the internal state (related to connection) isn't changed, while the guard
-    /// is valid. Nevertheless, it is possible to change the session preservation.
-    pub(crate) async fn lock_session(&self) -> Result<SessionGuard, RustyError> {
+    /// This way, it's possible to lock multiple times, unless `start` or `end` is executing at the
+    /// same time.
+    pub(crate) async fn soft_lock_session(&self) -> Result<SessionGuard, RustyError> {
         Ok(SessionGuard {
-            session: Arc::clone(&self.session),
-            internals_lock: self.session.read_lock().await?,
+            id_guard: self.session.session_view_lock().await?,
+            session_ref: Arc::clone(&self.session),
         })
     }
 }
-
-#[cfg(test)]
-mod test {}
