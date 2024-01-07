@@ -14,7 +14,7 @@ pub struct PlayerRef {
 
 impl PlayerRef {
     /// Returns the guild where the player is running in.
-    pub fn guild_id(&self) -> &GuildId {
+    pub fn guild(&self) -> &GuildId {
         &self.guild_id
     }
 
@@ -31,8 +31,11 @@ pub struct Player {
 }
 
 impl Player {
-    pub(crate) fn new(guild_id: GuildId, node: Node) -> Self {
-        let inner = PlayerRef { guild_id, node };
+    pub(crate) fn new(guild: GuildId, node: Node) -> Self {
+        let inner = PlayerRef {
+            guild_id: guild,
+            node,
+        };
         Self {
             inner: Arc::new(inner),
         }

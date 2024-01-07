@@ -5,8 +5,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{ops::Deref, sync::Arc};
 
-use hashbrown::HashMap;
 use reqwest::header::{HeaderMap, HeaderValue};
+use scc::HashMap;
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -67,15 +67,15 @@ pub(crate) enum StatsUpdater {
 
 pub(crate) struct NodeState {
     deleted: AtomicBool,
-    players: Arc<RwLock<HashMap<GuildId, Player>>>,
+    players: HashMap<GuildId, Player>,
     stats: RwLock<Option<NodeStats>>,
 }
 
 impl NodeState {
-    fn new() -> Self {
+    fn new(players: HashMap<GuildId, Player>) -> Self {
         Self {
             deleted: AtomicBool::new(false),
-            players: Arc::new(RwLock::new(HashMap::new())),
+            players,
             stats: RwLock::new(None),
         }
     }
@@ -92,7 +92,7 @@ impl NodeState {
 
     /// Returns the player if its node is connected and the node isn't valid.
     pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
-        let player = self.players.read().await.get(guild_id)?.clone();
+        let player = self.players.get_async(guild_id).await?.get().clone();
         let node = player.node();
 
         if node.state().invalid() {
@@ -109,7 +109,7 @@ impl NodeState {
 
     /// Removes the player if exists.
     pub(crate) async fn remove_player(&self, guild_id: &str) {
-        self.players.write().await.remove(guild_id);
+        self.players.remove_async(guild_id).await;
     }
 
     /// Update stats if the uptime of `new` is greater than the current one.
@@ -181,6 +181,7 @@ impl NodeRef {
         ws_url: Url,
         rest_url: Url,
         handlers: Arc<dyn EventHandlers>,
+        players: HashMap<GuildId, Player>,
     ) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
@@ -192,7 +193,7 @@ impl NodeRef {
             .build()
             .expect(""); // TODO: write this msg.
 
-        let state = Arc::new(NodeState::new());
+        let state = Arc::new(NodeState::new(players));
         let rest = Rest {
             url: rest_url,
             client: rest_client,
@@ -366,8 +367,8 @@ impl Deref for Node {
 pub struct NodeManagerRef {
     bot_user_id: String,
     handlers: Arc<dyn EventHandlers>,
-    nodes: RwLock<HashMap<NodeName, Node>>,
-    players: RwLock<HashMap<GuildId, Player>>,
+    nodes: HashMap<NodeName, Node>,
+    players: HashMap<GuildId, Player>,
 }
 
 impl NodeManagerRef {
@@ -375,8 +376,8 @@ impl NodeManagerRef {
         Self {
             bot_user_id,
             handlers,
-            nodes: RwLock::new(HashMap::new()),
-            players: RwLock::new(HashMap::new()),
+            nodes: HashMap::new(),
+            players: HashMap::new(),
         }
     }
 
@@ -405,12 +406,16 @@ impl NodeManagerRef {
 
     /// TODO:
     pub async fn get_player(&self, guild: GuildId) -> Result<Player, RustyError> {
-        // TODO: creates it if not present.
+        // - tries to find
+        // - inserts if not present
+        // - checks if it was already present
+        // - if yes then returns it
         todo!()
     }
 
     /// TODO:
     pub async fn remove_player(&self, guild: GuildId) -> Result<(), RustyError> {
+        // - removes the player from the main map and the node's map where it belongs.
         todo!()
     }
 
@@ -453,6 +458,8 @@ impl Deref for NodeManager {
 mod test {
     use std::{env, sync::Arc};
 
+    use scc::HashMap;
+
     use crate::async_trait;
     use crate::event::*;
     use crate::node::NodeConfig;
@@ -493,6 +500,7 @@ mod test {
             config.ws().expect("invalid web socket url"),
             config.rest().expect("invalid web socket url"),
             Arc::new(HandlersMock),
+            HashMap::new(),
         );
 
         Node::new(Arc::new(inner))
