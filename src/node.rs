@@ -181,7 +181,7 @@ impl NodeRef {
         ws_url: Url,
         rest_url: Url,
         handlers: Arc<dyn EventHandlers>,
-        players: HashMap<GuildId, Player>,
+        players: HashMap<GuildId, Player>, // TODO: main players hash map from NodeManagerRef.
     ) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
