@@ -207,6 +207,11 @@ impl NodeRef {
         }
     }
 
+    /// Returns true if the node no longer exists.
+    pub(crate) fn invalid(&self) -> bool {
+        self.state.invalid()
+    }
+
     /// Returns the node state.
     pub(crate) fn state(&self) -> Arc<NodeState> {
         Arc::clone(&self.state)
@@ -410,6 +415,7 @@ impl NodeManagerRef {
         // - inserts if not present
         // - checks if it was already present
         // - if yes then returns it
+        // - check if node wasn't invalidated before returning the player
         todo!()
     }
 
