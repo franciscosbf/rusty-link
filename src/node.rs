@@ -67,12 +67,12 @@ pub(crate) enum StatsUpdater {
 
 pub(crate) struct NodeState {
     deleted: AtomicBool,
-    players: HashMap<GuildId, Player>,
+    players: Arc<HashMap<GuildId, Player>>,
     stats: RwLock<Option<NodeStats>>,
 }
 
 impl NodeState {
-    fn new(players: HashMap<GuildId, Player>) -> Self {
+    fn new(players: Arc<HashMap<GuildId, Player>>) -> Self {
         Self {
             deleted: AtomicBool::new(false),
             players,
@@ -181,7 +181,7 @@ impl NodeRef {
         ws_url: Url,
         rest_url: Url,
         handlers: Arc<dyn EventHandlers>,
-        players: HashMap<GuildId, Player>, // TODO: main players hash map from NodeManagerRef.
+        players: Arc<HashMap<GuildId, Player>>, // TODO: main players hash map from NodeManagerRef.
     ) -> Self {
         // Build headers for REST API client.
         let mut rest_headers = HeaderMap::new();
@@ -368,7 +368,7 @@ pub struct NodeManagerRef {
     bot_user_id: String,
     handlers: Arc<dyn EventHandlers>,
     nodes: HashMap<NodeName, Node>,
-    players: HashMap<GuildId, Player>,
+    players: Arc<HashMap<GuildId, Player>>,
 }
 
 impl NodeManagerRef {
@@ -377,7 +377,7 @@ impl NodeManagerRef {
             bot_user_id,
             handlers,
             nodes: HashMap::new(),
-            players: HashMap::new(),
+            players: Arc::new(HashMap::new()),
         }
     }
 
@@ -500,7 +500,7 @@ mod test {
             config.ws().expect("invalid web socket url"),
             config.rest().expect("invalid web socket url"),
             Arc::new(HandlersMock),
-            HashMap::new(),
+            Arc::new(HashMap::new()),
         );
 
         Node::new(Arc::new(inner))
