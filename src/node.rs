@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{ops::Deref, sync::Arc};
 
 use reqwest::header::{HeaderMap, HeaderValue};
-use scc::HashMap;
+use scc::{HashMap, HashSet};
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -15,7 +15,7 @@ use crate::event::EventHandlers;
 use crate::model::{CurrentSessionState, NewSessionState, NodeStats, Secs};
 use crate::player::Player;
 use crate::socket::{SessionGuard, Socket};
-use crate::utils::process_request;
+use crate::utils::{process_request, spawn_fut};
 
 /// Discord guild identifier.
 pub type GuildId = String;
@@ -67,6 +67,7 @@ pub(crate) enum StatsUpdater {
 
 pub(crate) struct NodeState {
     deleted: AtomicBool,
+    players_to_remove: Arc<HashSet<GuildId>>,
     players: Arc<HashMap<GuildId, Player>>,
     stats: RwLock<Option<NodeStats>>,
 }
@@ -75,14 +76,33 @@ impl NodeState {
     fn new(players: Arc<HashMap<GuildId, Player>>) -> Self {
         Self {
             deleted: AtomicBool::new(false),
+            players_to_remove: Arc::new(HashSet::new()),
             players,
             stats: RwLock::new(None),
         }
     }
 
-    /// Mark the current channel state as deleted since it might still referred in some player.
+    /// Invalidates the node (i.e. doesn't exist anymore).
+    ///
+    /// Its state is flagged as deleted since it might still referred in some player. Players that
+    /// belong to this node are removed asynchronously as well.
     fn invalidate(&self) {
         self.deleted.store(true, Ordering::SeqCst);
+
+        // WARN: see if there's a better way to do this...
+        let players_to_remove = Arc::clone(&self.players_to_remove);
+        let players = Arc::clone(&self.players);
+        spawn_fut(async move {
+            players_to_remove
+                .scan_async(|guild| {
+                    let guild = guild.clone();
+                    let cplayers = Arc::clone(&players);
+                    spawn_fut(async move {
+                        cplayers.remove_async(&guild).await;
+                    })
+                })
+                .await;
+        });
     }
 
     /// Returns true if the node no longer exists.
@@ -93,12 +113,11 @@ impl NodeState {
     /// Returns the player if its node is connected and the node isn't valid.
     pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
         let player = self.players.get_async(guild_id).await?.get().clone();
-        let node = player.node();
 
-        if node.state().invalid() {
+        if self.invalid() {
             // Removes the player since it became invalid.
             self.remove_player(guild_id).await;
-        } else if !node.connected() {
+        } else if !player.node().connected() {
             // Do nothing if the client isn't connected to the node.
         } else {
             return Some(player);
@@ -109,6 +128,7 @@ impl NodeState {
 
     /// Removes the player if exists.
     pub(crate) async fn remove_player(&self, guild_id: &str) {
+        self.players_to_remove.remove_async(guild_id).await;
         self.players.remove_async(guild_id).await;
     }
 
