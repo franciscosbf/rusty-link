@@ -236,7 +236,7 @@ impl Session {
         self.preserved.store(false, Ordering::SeqCst);
     }
 
-    /// Tells to close the session if open.
+    /// Notifies to close the session if open.
     async fn wait_for_closing(&self) -> Result<(), RustyError> {
         if !self.connected() {
             return Ok(());
