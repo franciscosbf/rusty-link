@@ -169,12 +169,13 @@ impl SessionInternals {
 }
 
 /// Wraps a read guard over session internals for shared access so the session id can be safely
-/// read.
+/// read while the connection is open.
 struct SessionViewGuard<'a>(RwLockReadGuard<'a, SessionInternals>);
 
 impl<'a> SessionViewGuard<'a> {
-    fn session_id(&self) -> Option<&str> {
-        self.0.id.as_deref()
+    /// Assumes that the session id is stored.
+    fn session_id(&self) -> &str {
+        self.0.id.as_deref().unwrap()
     }
 }
 
@@ -299,9 +300,9 @@ pub(crate) struct SessionGuard<'a> {
 }
 
 impl<'a> SessionGuard<'a> {
+    /// Returns the current session id.
     pub(crate) fn id(&self) -> &str {
-        // Assumes that is present.
-        self.id_guard.session_id().unwrap()
+        self.id_guard.session_id()
     }
 
     pub(crate) fn preserve_session(&self) {
@@ -437,19 +438,14 @@ impl Socket {
         Alerter { tx, handler }
     }
 
-    /// Tells if it is connected or not.
-    pub(crate) fn connected(&self) -> bool {
-        self.session.connected()
-    }
-
     /// Creates a connection if not open.
     pub(crate) async fn start(&self) -> Result<bool, RustyError> {
+        let mut session_guard = self.session.session_change_lock().await;
+
         if self.session.connected() {
             // Doesn't make sense trying to connect again.
             return Err(RustyError::DuplicatedWebSocketError);
         }
-
-        let mut session_guard = self.session.session_change_lock().await;
 
         // Build partial web socket client request.
         let mut request_builder = http::Request::builder()
@@ -517,7 +513,7 @@ impl Socket {
         self.session.wait_for_closing().await
     }
 
-    /// Tells if session if tries to keep session or not.
+    /// Returns true if the socket tries to preserve the session on future connections.
     pub(crate) fn preserved_session(&self) -> bool {
         self.session.preserved()
     }
@@ -531,5 +527,18 @@ impl Socket {
             id_guard: self.session.session_view_lock().await?,
             session_ref: Arc::clone(&self.session),
         })
+    }
+
+    /// Returns the current session id, if connection is open.
+    pub(crate) async fn session_id(&self) -> Option<String> {
+        match self.session.session_view_lock().await {
+            Ok(guard) => Some(guard.session_id().to_string()),
+            Err(_) => None, // Shadows the error since there isn't a open connection.
+        }
+    }
+
+    /// Returns true if connection is open.
+    pub(crate) fn connected(&self) -> bool {
+        self.session.connected()
     }
 }

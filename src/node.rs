@@ -161,10 +161,6 @@ impl NodeRef {
 
     /// Returns the player if its node is connected and the node isn't valid.
     pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
-        if self.invalid() || self.connected() {
-            return None;
-        }
-
         let player = self.players.get_async(guild_id).await?.get().clone();
 
         Some(player)
@@ -172,10 +168,6 @@ impl NodeRef {
 
     /// Removes the player if exists.
     pub(crate) async fn remove_player(&self, guild_id: &str) {
-        if self.invalid() {
-            return;
-        }
-
         self.players.remove_async(guild_id).await;
         self.players_to_remove.remove_async(guild_id).await;
     }
@@ -302,6 +294,11 @@ impl NodeRef {
         self.socket.preserved_session()
     }
 
+    /// Returns the current session id if connected to the node.
+    pub async fn current_session_id(&self) -> Option<String> {
+        self.socket.session_id().await
+    }
+
     /// TODO:
     pub async fn fetch_stats(&self) -> Result<NodeStats, RustyError> {
         let url = self.rest.url().join("stats").unwrap();
@@ -394,32 +391,33 @@ impl NodeManagerRef {
     /// # Panics
     ///
     /// TODO: explain panic at reqwest::Client creation...
-    pub async fn add_node(&self, info: NodeConfig) -> Result<(), RustyError> {
+    pub async fn add_node(&self, _info: NodeConfig) -> Result<(), RustyError> {
         todo!()
     }
 
     /// TODO:
-    pub async fn get_node(&self, name: NodeName) -> Result<Node, RustyError> {
+    pub async fn get_node(&self, _name: NodeName) -> Result<Node, RustyError> {
         todo!()
     }
 
     /// TODO:
-    pub async fn remove_node(name: NodeName) -> Result<(), RustyError> {
+    pub async fn remove_node(_name: NodeName) -> Result<(), RustyError> {
         todo!()
     }
 
     /// TODO:
-    pub async fn get_player(&self, guild: GuildId) -> Result<Player, RustyError> {
+    pub async fn get_player(&self, _guild: GuildId) -> Result<Player, RustyError> {
         // - tries to find
         // - inserts if not present
         // - checks if it was already present
         // - if yes then returns it
         // - check if node wasn't invalidated before returning the player
+        // - if node is invalid, creates a new one.
         todo!()
     }
 
     /// TODO:
-    pub async fn remove_player(&self, guild: GuildId) -> Result<(), RustyError> {
+    pub async fn remove_player(&self, _guild: GuildId) -> Result<(), RustyError> {
         // - removes the player from the main map and the node's map where it belongs.
         todo!()
     }
@@ -513,7 +511,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires a lavalink instance"]
-    async fn test_web_socket_connect_and_close() {
+    async fn web_socket_connect_and_close() {
         let node = new_node();
 
         let result = node.connect().await;
@@ -523,6 +521,8 @@ mod test {
             result.unwrap_err()
         );
         assert!(!result.unwrap(), "received true");
+
+        assert!(node.current_session_id().await.is_some());
 
         let result = node.close().await;
         assert!(
@@ -530,20 +530,21 @@ mod test {
             "error from close method: {}",
             result.unwrap_err()
         );
+
+        assert!(!node.connected());
+        assert!(node.current_session_id().await.is_none());
     }
 
     #[tokio::test]
     #[ignore = "requires a lavalink instance"]
-    async fn test_session_state_change() {
+    async fn session_state_change_in_the_same_connection() {
         let node = new_node();
 
-        let result = node.connect().await;
-        assert!(
-            result.is_ok(),
-            "error from connect method: {}",
-            result.unwrap_err()
-        );
-        assert!(!result.unwrap(), "received true");
+        node.connect()
+            .await
+            .expect("Failed to connect to the node.");
+
+        assert!(!node.preserved_session());
 
         let result = node.preserve_session().await;
         assert!(
@@ -596,11 +597,40 @@ mod test {
             "local session state isn't false after discarding"
         );
 
-        let result = node.close().await;
+        node.close().await.expect("Unexpected error on close.");
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a lavalink instance"]
+    async fn session_state_change_with_reconnection() {
+        let node = new_node();
+
+        node.connect()
+            .await
+            .expect("Failed to connect to the node.");
+
+        let previous_session_id = node.current_session_id().await;
+
+        node.preserve_session()
+            .await
+            .expect("Unexpected error while trying to preserve session.");
+
+        node.close().await.expect("Unexpected error on close.");
+
+        let result = node.connect().await;
         assert!(
             result.is_ok(),
-            "error from close method: {}",
+            "error from connect method: {}",
             result.unwrap_err()
         );
+        assert!(
+            result.unwrap(),
+            "received false which means that the session wasn't restored"
+        );
+
+        let current_session_id = node.current_session_id().await;
+        assert_eq!(previous_session_id, current_session_id);
+
+        node.close().await.expect("Unexpected error on close.");
     }
 }
