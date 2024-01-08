@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::{ops::Deref, sync::Arc};
 
 use reqwest::header::{HeaderMap, HeaderValue};
-use scc::{HashMap, HashSet};
+use scc::HashMap;
 use tokio::sync::RwLock;
 use url::Url;
 
@@ -65,20 +65,64 @@ pub(crate) enum StatsUpdater {
     Endpoint,
 }
 
-pub(crate) struct NodeState {
-    deleted: AtomicBool,
-    players_to_remove: Arc<HashSet<GuildId>>,
-    players: Arc<HashMap<GuildId, Player>>,
-    stats: RwLock<Option<NodeStats>>,
+/// Contains a [`reqwest::Client`] to issue HTTP operations in the node REST API.
+pub(crate) struct Rest {
+    url: Url,
+    client: reqwest::Client,
 }
 
-impl NodeState {
-    fn new(players: Arc<HashMap<GuildId, Player>>) -> Self {
+impl Rest {
+    pub(crate) fn url(&self) -> &Url {
+        &self.url
+    }
+
+    /// Returns the HTTP client.
+    pub(crate) fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+}
+
+/// TODO:
+pub struct NodeRef {
+    deleted: AtomicBool,
+    players_to_remove: Arc<HashMap<GuildId, ()>>,
+    players: Arc<HashMap<GuildId, Player>>,
+    stats: RwLock<Option<NodeStats>>,
+    rest: Rest,
+    socket: Socket,
+}
+
+impl NodeRef {
+    fn new(
+        bot_user_id: String,
+        password: String,
+        ws_url: Url,
+        rest_url: Url,
+        handlers: Arc<dyn EventHandlers>,
+        players: Arc<HashMap<GuildId, Player>>, // TODO: main players hash map from NodeManagerRef.
+    ) -> Self {
+        // Build headers for REST API client.
+        let mut rest_headers = HeaderMap::new();
+        rest_headers.insert("Authorization", HeaderValue::from_str(&password).unwrap());
+
+        // Build REST client.
+        let rest = Rest {
+            url: rest_url,
+            client: reqwest::Client::builder()
+                .default_headers(rest_headers)
+                .build()
+                .expect(""), // TODO: write this msg.
+        };
+
+        let socket = Socket::new(ws_url, bot_user_id, password, handlers);
+
         Self {
             deleted: AtomicBool::new(false),
-            players_to_remove: Arc::new(HashSet::new()),
+            players_to_remove: Arc::new(HashMap::new()),
             players,
             stats: RwLock::new(None),
+            rest,
+            socket,
         }
     }
 
@@ -89,47 +133,51 @@ impl NodeState {
     fn invalidate(&self) {
         self.deleted.store(true, Ordering::SeqCst);
 
-        // WARN: see if there's a better way to do this...
+        // Proceeds to remove all players from the global map in background.
         let players_to_remove = Arc::clone(&self.players_to_remove);
         let players = Arc::clone(&self.players);
         spawn_fut(async move {
-            players_to_remove
-                .scan_async(|guild| {
-                    let guild = guild.clone();
-                    let cplayers = Arc::clone(&players);
-                    spawn_fut(async move {
-                        cplayers.remove_async(&guild).await;
-                    })
-                })
-                .await;
+            // Stops here if there are no players.
+            let mut entry = players_to_remove.first_entry_async().await?;
+
+            loop {
+                // Removes the player.
+                let guild = entry.key();
+                players.remove_async(guild).await;
+
+                // Moves to the next entry if any.
+                entry = entry.next_async().await?;
+            }
+
+            #[allow(unreachable_code)]
+            Option::<()>::None
         });
     }
 
     /// Returns true if the node no longer exists.
-    fn invalid(&self) -> bool {
+    pub(crate) fn invalid(&self) -> bool {
         self.deleted.load(Ordering::SeqCst)
     }
 
     /// Returns the player if its node is connected and the node isn't valid.
     pub(crate) async fn get_player(&self, guild_id: &str) -> Option<Player> {
-        let player = self.players.get_async(guild_id).await?.get().clone();
-
-        if self.invalid() {
-            // Removes the player since it became invalid.
-            self.remove_player(guild_id).await;
-        } else if !player.node().connected() {
-            // Do nothing if the client isn't connected to the node.
-        } else {
-            return Some(player);
+        if self.invalid() || self.connected() {
+            return None;
         }
 
-        None
+        let player = self.players.get_async(guild_id).await?.get().clone();
+
+        Some(player)
     }
 
     /// Removes the player if exists.
     pub(crate) async fn remove_player(&self, guild_id: &str) {
-        self.players_to_remove.remove_async(guild_id).await;
+        if self.invalid() {
+            return;
+        }
+
         self.players.remove_async(guild_id).await;
+        self.players_to_remove.remove_async(guild_id).await;
     }
 
     /// Update stats if the uptime of `new` is greater than the current one.
@@ -167,74 +215,6 @@ impl NodeState {
     /// Return last stats update registered.
     async fn last_stats(&self) -> Option<NodeStats> {
         self.stats.read().await.as_ref().cloned()
-    }
-}
-
-/// Contains a [`reqwest::Client`] to issue HTTP operations in the node REST API.
-pub(crate) struct Rest {
-    url: Url,
-    client: reqwest::Client,
-}
-
-impl Rest {
-    pub(crate) fn url(&self) -> &Url {
-        &self.url
-    }
-
-    /// Returns the HTTP client.
-    pub(crate) fn client(&self) -> &reqwest::Client {
-        &self.client
-    }
-}
-
-/// TODO:
-pub struct NodeRef {
-    state: Arc<NodeState>,
-    rest: Rest,
-    socket: Socket,
-}
-
-impl NodeRef {
-    fn new(
-        bot_user_id: String,
-        password: String,
-        ws_url: Url,
-        rest_url: Url,
-        handlers: Arc<dyn EventHandlers>,
-        players: Arc<HashMap<GuildId, Player>>, // TODO: main players hash map from NodeManagerRef.
-    ) -> Self {
-        // Build headers for REST API client.
-        let mut rest_headers = HeaderMap::new();
-        rest_headers.insert("Authorization", HeaderValue::from_str(&password).unwrap());
-
-        // Build REST client.
-        let rest_client = reqwest::Client::builder()
-            .default_headers(rest_headers)
-            .build()
-            .expect(""); // TODO: write this msg.
-
-        let state = Arc::new(NodeState::new(players));
-        let rest = Rest {
-            url: rest_url,
-            client: rest_client,
-        };
-        let socket = Socket::new(ws_url, bot_user_id, password, handlers, Arc::clone(&state));
-
-        Self {
-            state,
-            rest,
-            socket,
-        }
-    }
-
-    /// Returns true if the node no longer exists.
-    pub(crate) fn invalid(&self) -> bool {
-        self.state.invalid()
-    }
-
-    /// Returns the node state.
-    pub(crate) fn state(&self) -> Arc<NodeState> {
-        Arc::clone(&self.state)
     }
 
     /// HTTP client and url to perform REST operations.
@@ -330,8 +310,7 @@ impl NodeRef {
         let mut stats = process_request(request).await?;
 
         // Tries to update the current uptime.
-        self.state
-            .maybe_update_stats(&mut stats, StatsUpdater::Endpoint)
+        self.maybe_update_stats(&mut stats, StatsUpdater::Endpoint)
             .await;
 
         Ok(stats)
@@ -339,7 +318,7 @@ impl NodeRef {
 
     /// TODO:
     pub async fn get_stats(&self) -> Option<NodeStats> {
-        *self.state.stats.read().await
+        self.last_stats().await
     }
 
     /// TODO:

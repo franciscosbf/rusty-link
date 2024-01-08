@@ -18,7 +18,7 @@ use crate::event::{
     DiscordWsClosedEvent, EventHandlers, TrackEndEvent, TrackExceptionEvent, TrackStartEvent,
     TrackStuckEvent, WsClientErrorEvent,
 };
-use crate::node::{Node, NodeState, StatsUpdater};
+use crate::node::{Node, StatsUpdater};
 use crate::op::{EventType, OpType, ReadyOp};
 use crate::player::Player;
 use crate::utils::spawn_fut;
@@ -288,7 +288,6 @@ pub(crate) struct Socket {
     bot_id: String,
     password: String,
     handlers: Arc<dyn EventHandlers>,
-    state: Arc<NodeState>,
     session: Arc<Session>,
     node: Option<Node>,
 }
@@ -320,14 +319,12 @@ impl Socket {
         bot_id: String,
         password: String,
         handlers: Arc<dyn EventHandlers>,
-        state: Arc<NodeState>,
     ) -> Self {
         Self {
             url,
             bot_id,
             password,
             handlers,
-            state,
             node: None,
             session: Arc::new(Session::new()),
         }
@@ -340,9 +337,9 @@ impl Socket {
 
     /// Spawns the web socket receiver loop.
     fn listen(&self, mut stream: Stream) -> Alerter {
+        // NOTE: assumes that node_ref was already called.
         let node = self.node.as_ref().unwrap().clone();
         let handlers = Arc::clone(&self.handlers);
-        let state = Arc::clone(&self.state);
         let session = Arc::clone(&self.session);
         let (tx, mut rx) = oneshot::channel();
 
@@ -394,7 +391,7 @@ impl Socket {
                         // Process operation.
                         match op_type {
                             OpType::PlayerUpdate(op) => {
-                                match state.get_player(op.guild_id).await {
+                                match node.get_player(op.guild_id).await {
                                     Some(player) => {
                                         // TODO:
                                         let _ = op;
@@ -404,11 +401,11 @@ impl Socket {
                                 }
                             }
                             OpType::Stats(mut op) =>
-                                state.maybe_update_stats(
+                                node.maybe_update_stats(
                                     &mut op.stats, StatsUpdater::WebSocket
                                 ).await,
                             OpType::Event(op) => {
-                                match state.get_player(op.guild_id).await {
+                                match node.get_player(op.guild_id).await {
                                     Some(player) => {
                                         let chandlers = Arc::clone(&handlers);
                                         let cnode = node.clone();
@@ -432,7 +429,7 @@ impl Socket {
 
             // Reset node stats. After the socket has been closed, we don't know
             // if the node will keep operating or not.
-            state.clear_stats().await;
+            node.clear_stats().await;
 
             normal_close_result.unwrap_or_else(|| Ok(()))
         });
