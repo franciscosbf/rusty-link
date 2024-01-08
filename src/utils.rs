@@ -2,6 +2,7 @@
 
 use futures_util::Future;
 use serde::de;
+use tokio::task::JoinHandle;
 
 use crate::{error::RustyError, model::ApiError};
 
@@ -33,9 +34,10 @@ where
 }
 
 /// Spawns a future.
-pub(crate) fn spawn_fut<F>(future: F)
+pub(crate) fn spawn_fut<F, R>(future: F) -> JoinHandle<R>
 where
-    F: Future<Output = ()> + Send + 'static,
+    F: Future<Output = R> + Send + 'static,
+    R: Send + 'static,
 {
-    tokio::spawn(future);
+    tokio::spawn(future)
 }
